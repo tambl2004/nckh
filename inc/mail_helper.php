@@ -12,8 +12,8 @@ function sendMail($to, $subject, $message) {
         $mail->isSMTP();
         $mail->Host = 'smtp.gmail.com'; // Thay bằng SMTP server của bạn
         $mail->SMTPAuth = true;
-        $mail->Username = 'thanhhtb2312@gmail.com'; // Thay bằng email của bạn
-        $mail->Password = 'ejlsqkkocrokychg'; // Mật khẩu ứng dụng
+        $mail->Username = 'email@example.com'; // Thay bằng email của bạn
+        $mail->Password = 'abcabcabc'; // Mật khẩu ứng dụng
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port = 587;
         $mail->CharSet = 'UTF-8';

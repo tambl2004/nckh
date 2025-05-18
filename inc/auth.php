@@ -8,7 +8,7 @@ function isLoggedIn() {
 
 // Kiểm tra quyền admin
 function isAdmin() {
-    return isLoggedIn() && $_SESSION['role_id'] == 1;
+    return isLoggedIn() && isset($_SESSION['role_id']) && $_SESSION['role_id'] == 1;
 }
 
 // Chuyển hướng nếu chưa đăng nhập
@@ -93,4 +93,50 @@ function updateLastLogin($user_id) {
     $stmt = $pdo->prepare("UPDATE users SET last_login = NOW() WHERE user_id = ?");
     $stmt->execute([$user_id]);
 }
+
+// Ghi nhật ký hệ thống
+function logSystem($level, $message, $source = 'system') {
+    global $pdo;
+    
+    $stmt = $pdo->prepare("INSERT INTO system_logs (log_level, message, source) VALUES (?, ?, ?)");
+    return $stmt->execute([$level, $message, $source]);
+}
+
+// Kiểm tra người dùng có quyền thực hiện hành động không
+function hasPermission($permission) {
+    // Nếu là admin, luôn có tất cả quyền
+    if (isAdmin()) {
+        return true;
+    }
+    
+    // Lấy danh sách quyền của vai trò
+    global $pdo;
+    $role_id = $_SESSION['role_id'] ?? 0;
+    
+    // Trong thực tế, bạn sẽ cần bảng role_permissions để lưu quyền của từng vai trò
+    $stmt = $pdo->prepare("SELECT permissions FROM role_permissions WHERE role_id = ?");
+    $stmt->execute([$role_id]);
+    $result = $stmt->fetch();
+    
+    if ($result && !empty($result['permissions'])) {
+        $permissions = json_decode($result['permissions'], true);
+        return in_array($permission, $permissions);
+    }
+    
+    return false;
+}
+// Thêm vào cuối file auth.php
+// Hàm ghi log cho mysqli
+function logUserAction($userId, $actionType, $description) {
+    global $conn;
+    
+    $ipAddress = $_SERVER['REMOTE_ADDR'];
+    $userAgent = $_SERVER['HTTP_USER_AGENT'];
+    
+    $sql = "INSERT INTO user_logs (user_id, action_type, description, ip_address, user_agent) 
+            VALUES ($userId, '$actionType', '$description', '$ipAddress', '$userAgent')";
+    
+    $conn->query($sql);
+}
+
 ?>

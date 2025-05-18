@@ -3,7 +3,7 @@
     --secondary-color: #f8f9fd;
     --accent-color: #ff6b6b;
     --text-color: #1a1a2e;
-    --sidebar-width: 240px;
+    --sidebar-width: 260px;
 }
 body {
     font-family: 'Inter', sans-serif;
@@ -24,7 +24,7 @@ body {
     border-radius: 0 20px 20px 0;
 }
 .sidebar .logo {
-    padding: 13px 0px 0px 0px;
+    padding: 13px 0px 12px 0px;
     text-align: center;
     border-bottom: 1px solid rgba(0,0,0,0.05);
 }
@@ -55,7 +55,7 @@ body {
     display: flex;
     align-items: center;
     border-radius: 10px;
-    margin: 4px 15px;
+    margin: 5px 15px;
 }
 .sidebar .nav-link:hover, .sidebar .nav-link.active {
     background: rgba(255,255,255,0.15);
@@ -91,7 +91,7 @@ body {
 }
 main {
     margin-left: var(--sidebar-width);
-    padding: 55px 40px 40px;
+    padding: 95px 20px 100px;
     animation: fadeIn 0.5s ease-in-out;
     max-height: 100vh; /* Giới hạn chiều cao tối đa của main */
     overflow-y: auto; /* Cho phép cuộn theo chiều dọc */

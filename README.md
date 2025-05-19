@@ -53,7 +53,7 @@
 
 ```bash
 # Clone project
-git clone https://github.com/username/smart-warehouse.git
+git clone https://github.com/tambl2004/nckh.git
 
 # Di chuyển vào thư mục dự án
 cd smart-warehouse

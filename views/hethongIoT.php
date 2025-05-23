@@ -1,1068 +1,927 @@
 <?php
 // Kiểm tra quyền truy cập
-if (!hasPermission('view_iot_devices')) {
-    echo '<div class="alert alert-danger">Bạn không có quyền truy cập chức năng này</div>';
+if (!isLoggedIn()) {
+    header('Location: login.php');
     exit;
 }
 
-// Xử lý thêm thiết bị mới
-if (isset($_POST['add_device'])) {
-    $device_code = $_POST['device_code'];
-    $device_name = $_POST['device_name'];
-    $device_type = $_POST['device_type'];
-    $warehouse_id = $_POST['warehouse_id'];
-    $zone_id = $_POST['zone_id'] ?? null;
-    $mac_address = $_POST['mac_address'] ?? null;
-    $ip_address = $_POST['ip_address'] ?? null;
-    $firmware_version = $_POST['firmware_version'] ?? null;
-    $status = $_POST['status'] ?? 'ACTIVE';
-    
-    // Kiểm tra mã thiết bị đã tồn tại chưa
-    $check_sql = "SELECT COUNT(*) FROM iot_devices WHERE device_code = ?";
-    $stmt = $pdo->prepare($check_sql);
-    $stmt->execute([$device_code]);
-    if ($stmt->fetchColumn() > 0) {
-        $error_message = "Mã thiết bị đã tồn tại!";
-    } else {
-        // Thêm thiết bị mới
-        $insert_sql = "INSERT INTO iot_devices (device_code, device_name, device_type, warehouse_id, zone_id, 
-                        mac_address, ip_address, firmware_version, status) 
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        $stmt = $pdo->prepare($insert_sql);
-        if ($stmt->execute([$device_code, $device_name, $device_type, $warehouse_id, $zone_id, 
-                            $mac_address, $ip_address, $firmware_version, $status])) {
-            // Tạo trạng thái ban đầu cho thiết bị
-            $device_id = $pdo->lastInsertId();
-            $status_sql = "INSERT INTO iot_device_statuses (device_id, power_status, battery_level) 
-                          VALUES (?, 'OFF', 100)";
-            $stmt = $pdo->prepare($status_sql);
-            $stmt->execute([$device_id]);
-            
-            $success_message = "Thêm thiết bị thành công!";
-            
-            // Ghi log hoạt động
-            logUserActivity($_SESSION['user_id'], 'ADD_IOT_DEVICE', "Thêm thiết bị IoT: $device_name");
-        } else {
-            $error_message = "Lỗi: Không thể thêm thiết bị!";
-        }
+// Lấy danh sách thiết bị IoT
+$sql = "SELECT d.*, w.warehouse_name, wz.zone_code 
+        FROM iot_devices d
+        LEFT JOIN warehouses w ON d.warehouse_id = w.warehouse_id
+        LEFT JOIN warehouse_zones wz ON d.zone_id = wz.zone_id
+        ORDER BY d.device_id DESC";
+$result = $conn->query($sql);
+$devices = [];
+
+if ($result && $result->num_rows > 0) {
+    while ($row = $result->fetch_assoc()) {
+        $devices[] = $row;
     }
 }
 
-// Xử lý cập nhật thiết bị
-if (isset($_POST['update_device'])) {
-    $device_id = $_POST['device_id'];
-    $device_name = $_POST['device_name'];
-    $device_type = $_POST['device_type'];
-    $warehouse_id = $_POST['warehouse_id'];
-    $zone_id = $_POST['zone_id'] ?? null;
-    $mac_address = $_POST['mac_address'] ?? null;
-    $ip_address = $_POST['ip_address'] ?? null;
-    $firmware_version = $_POST['firmware_version'] ?? null;
-    $last_maintenance_date = !empty($_POST['last_maintenance_date']) ? $_POST['last_maintenance_date'] : null;
-    $next_maintenance_date = !empty($_POST['next_maintenance_date']) ? $_POST['next_maintenance_date'] : null;
-    $status = $_POST['status'] ?? 'ACTIVE';
-    
-    $update_sql = "UPDATE iot_devices SET 
-                   device_name = ?, device_type = ?, warehouse_id = ?, zone_id = ?, 
-                   mac_address = ?, ip_address = ?, firmware_version = ?,
-                   last_maintenance_date = ?, next_maintenance_date = ?, status = ? 
-                   WHERE device_id = ?";
-    
-    $stmt = $pdo->prepare($update_sql);
-    
-    if ($stmt->execute([$device_name, $device_type, $warehouse_id, $zone_id, 
-                       $mac_address, $ip_address, $firmware_version,
-                       $last_maintenance_date, $next_maintenance_date, $status, $device_id])) {
-        $success_message = "Cập nhật thiết bị thành công!";
-        
-        // Ghi log hoạt động
-        logUserActivity($_SESSION['user_id'], 'UPDATE_IOT_DEVICE', "Cập nhật thiết bị IoT ID: $device_id");
-    } else {
-        $error_message = "Lỗi: Không thể cập nhật thiết bị!";
+// Lấy danh sách kho
+$warehousesSql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
+$warehousesResult = $conn->query($warehousesSql);
+$warehouses = [];
+
+if ($warehousesResult && $warehousesResult->num_rows > 0) {
+    while ($row = $warehousesResult->fetch_assoc()) {
+        $warehouses[] = $row;
     }
 }
-
-// Xử lý xóa thiết bị
-if (isset($_POST['delete_device'])) {
-    $device_id = $_POST['device_id'];
-    
-    // Xóa trạng thái thiết bị trước
-    $delete_status_sql = "DELETE FROM iot_device_statuses WHERE device_id = ?";
-    $stmt = $pdo->prepare($delete_status_sql);
-    $stmt->execute([$device_id]);
-    
-    // Sau đó xóa thiết bị
-    $delete_device_sql = "DELETE FROM iot_devices WHERE device_id = ?";
-    $stmt = $pdo->prepare($delete_device_sql);
-    
-    if ($stmt->execute([$device_id])) {
-        $success_message = "Xóa thiết bị thành công!";
-        
-        // Ghi log hoạt động
-        logUserActivity($_SESSION['user_id'], 'DELETE_IOT_DEVICE', "Xóa thiết bị IoT ID: $device_id");
-    } else {
-        $error_message = "Lỗi: Không thể xóa thiết bị!";
-    }
-}
-
-// Cập nhật trạng thái thiết bị
-if (isset($_POST['update_device_status'])) {
-    $device_id = $_POST['device_id'];
-    $power_status = $_POST['power_status'];
-    $battery_level = $_POST['battery_level'];
-    $is_error = isset($_POST['is_error']) ? 1 : 0;
-    $error_message = $_POST['error_message'] ?? null;
-    
-    $update_sql = "INSERT INTO iot_device_statuses (device_id, power_status, battery_level, is_error, error_message) 
-                   VALUES (?, ?, ?, ?, ?)";
-    
-    $stmt = $pdo->prepare($update_sql);
-    
-    if ($stmt->execute([$device_id, $power_status, $battery_level, $is_error, $error_message])) {
-        $success_message = "Cập nhật trạng thái thiết bị thành công!";
-        
-        // Ghi log hoạt động
-        logUserActivity($_SESSION['user_id'], 'UPDATE_IOT_STATUS', "Cập nhật trạng thái thiết bị IoT ID: $device_id");
-    } else {
-        $error_message = "Lỗi: Không thể cập nhật trạng thái thiết bị!";
-    }
-}
-
-// Lấy danh sách kho hàng
-$warehouses_sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
-$warehouses_stmt = $pdo->query($warehouses_sql);
-$warehouses = $warehouses_stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Phân trang
-$page = isset($_GET['page']) ? intval($_GET['page']) : 1;
-$limit = 10;
-$offset = ($page - 1) * $limit;
-
-// Lấy tổng số lượng thiết bị
-$count_sql = "SELECT COUNT(*) FROM iot_devices";
-$total_devices = $pdo->query($count_sql)->fetchColumn();
-$total_pages = ceil($total_devices / $limit);
-
-// Lấy danh sách thiết bị có phân trang
-$devices_sql = "SELECT d.*, w.warehouse_name, z.zone_name 
-                FROM iot_devices d
-                LEFT JOIN warehouses w ON d.warehouse_id = w.warehouse_id
-                LEFT JOIN warehouse_zones z ON d.zone_id = z.zone_id
-                ORDER BY d.device_id DESC
-                LIMIT $offset, $limit";
-$devices_stmt = $pdo->query($devices_sql);
-$devices = $devices_stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
-<div class="function-container">
-    <!-- Hiển thị thông báo thành công/lỗi -->
-    <?php if (isset($success_message)): ?>
-        <div class="alert alert-success"><?php echo $success_message; ?></div>
-    <?php endif; ?>
-    
-    <?php if (isset($error_message)): ?>
-        <div class="alert alert-danger"><?php echo $error_message; ?></div>
-    <?php endif; ?>
-
+<div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h3 class="page-title">Quản lý thiết bị IoT</h3>
-        
-        <?php if (hasPermission('add_iot_devices')): ?>
-        <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addDeviceModal">
-            <i class="fas fa-plus-circle me-2"></i>Thêm thiết bị mới
+        <h1 class="page-title">Quản lý hệ thống IoT</h1>
+        <button class="btn btn-add" onclick="showAddDeviceModal()">
+            <i class="fas fa-plus-circle me-2"></i>Thêm thiết bị
         </button>
-        <?php endif; ?>
     </div>
 
-    <!-- Tabs cho các chức năng khác nhau -->
-    <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4" id="iotTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="devices-tab" data-bs-toggle="tab" data-bs-target="#devices" type="button" role="tab" aria-controls="devices" aria-selected="true">
-                <i class="fas fa-microchip me-1"></i>Danh sách thiết bị
+                <i class="fas fa-microchip me-2"></i>Thiết bị
             </button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="status-tab" data-bs-toggle="tab" data-bs-target="#status" type="button" role="tab" aria-controls="status" aria-selected="false">
-                <i class="fas fa-heartbeat me-1"></i>Trạng thái thiết bị
+                <i class="fas fa-heartbeat me-2"></i>Trạng thái
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button" role="tab" aria-controls="logs" aria-selected="false">
+                <i class="fas fa-history me-2"></i>Nhật ký
             </button>
         </li>
     </ul>
 
-    <div class="tab-content" id="myTabContent">
-        <!-- Tab danh sách thiết bị -->
+    <!-- Tab Content -->
+    <div class="tab-content" id="iotTabsContent">
+        <!-- Thiết bị Tab -->
         <div class="tab-pane fade show active" id="devices" role="tabpanel" aria-labelledby="devices-tab">
-            <div class="table-responsive">
-                <table class="table data-table">
-                    <thead>
-                        <tr>
-                            <th width="5%">ID</th>
-                            <th width="10%">Mã thiết bị</th>
-                            <th width="15%">Tên thiết bị</th>
-                            <th width="10%">Loại</th>
-                            <th width="15%">Vị trí</th>
-                            <th width="10%">Firmware</th>
-                            <th width="10%">Trạng thái</th>
-                            <th width="15%">Bảo trì tiếp theo</th>
-                            <th width="10%">Hành động</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($devices as $device): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($device['device_id']); ?></td>
-                                <td><?php echo htmlspecialchars($device['device_code']); ?></td>
-                                <td><?php echo htmlspecialchars($device['device_name']); ?></td>
-                                <td>
-                                    <?php 
-                                    $type_map = [
-                                        'RFID_SCANNER' => '<span class="badge bg-primary">RFID Scanner</span>',
-                                        'BARCODE_SCANNER' => '<span class="badge bg-info">Barcode Scanner</span>',
-                                        'TEMPERATURE_SENSOR' => '<span class="badge bg-success">Nhiệt độ</span>',
-                                        'OTHER' => '<span class="badge bg-secondary">Khác</span>'
-                                    ];
-                                    echo $type_map[$device['device_type']] ?? $device['device_type'];
-                                    ?>
-                                </td>
-                                <td>
-                                    <?php 
-                                    echo htmlspecialchars($device['warehouse_name'] ?? 'N/A');
-                                    if (!empty($device['zone_name'])) {
-                                        echo ' - ' . htmlspecialchars($device['zone_name']);
-                                    }
-                                    ?>
-                                </td>
-                                <td><?php echo htmlspecialchars($device['firmware_version'] ?? 'N/A'); ?></td>
-                                <td>
-                                    <?php 
-                                    $status_map = [
-                                        'ACTIVE' => '<span class="status-badge status-active">Hoạt động</span>',
-                                        'INACTIVE' => '<span class="status-badge status-inactive">Không hoạt động</span>',
-                                        'MAINTENANCE' => '<span class="status-badge" style="background-color: #fff3cd; color: #856404;">Bảo trì</span>'
-                                    ];
-                                    echo $status_map[$device['status']] ?? $device['status'];
-                                    ?>
-                                </td>
-                                <td>
-                                    <?php 
-                                    if (!empty($device['next_maintenance_date'])) {
-                                        $next_date = new DateTime($device['next_maintenance_date']);
-                                        $today = new DateTime();
-                                        $days_remaining = $today->diff($next_date)->days;
-                                        
-                                        echo htmlspecialchars($device['next_maintenance_date']);
-                                        
-                                        if ($next_date < $today) {
-                                            echo ' <span class="badge bg-danger">Quá hạn</span>';
-                                        } elseif ($days_remaining <= 7) {
-                                            echo ' <span class="badge bg-warning">Sắp tới</span>';
-                                        }
-                                    } else {
-                                        echo 'Chưa lên lịch';
-                                    }
-                                    ?>
-                                </td>
-                                <td>
-                                    <div class="action-buttons">
-                                        <?php if (hasPermission('edit_iot_devices')): ?>
-                                        <button type="button" class="btn btn-edit" data-bs-toggle="modal" data-bs-target="#editDeviceModal" 
-                                            data-device='<?php echo json_encode($device); ?>'>
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <?php endif; ?>
-                                        
-                                        <?php if (hasPermission('delete_iot_devices')): ?>
-                                        <button type="button" class="btn btn-delete" data-bs-toggle="modal" data-bs-target="#deleteDeviceModal" 
-                                            data-device-id="<?php echo $device['device_id']; ?>" 
-                                            data-device-name="<?php echo htmlspecialchars($device['device_name']); ?>">
-                                            <i class="fas fa-trash-alt"></i>
-                                        </button>
-                                        <?php endif; ?>
-                                        
-                                        <button type="button" class="btn btn-primary" data-bs-toggle="modal" 
-                                            data-bs-target="#deviceStatusModal" data-device-id="<?php echo $device['device_id']; ?>"
-                                            data-device-name="<?php echo htmlspecialchars($device['device_name']); ?>">
-                                            <i class="fas fa-info-circle"></i>
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                        
-                        <?php if (empty($devices)): ?>
-                            <tr>
-                                <td colspan="9" class="text-center">Không có thiết bị nào</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-            
-            <!-- Phân trang -->
-            <?php if ($total_pages > 1): ?>
-                <nav aria-label="Page navigation">
-                    <ul class="pagination justify-content-center">
-                        <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?option=hethongIoT&page=<?php echo $page - 1; ?>" aria-label="Previous">
-                                <span aria-hidden="true">&laquo;</span>
-                            </a>
-                        </li>
-                        
-                        <?php for ($i = 1; $i <= $total_pages; $i++): ?>
-                            <li class="page-item <?php echo ($page == $i) ? 'active' : ''; ?>">
-                                <a class="page-link" href="?option=hethongIoT&page=<?php echo $i; ?>"><?php echo $i; ?></a>
-                            </li>
-                        <?php endfor; ?>
-                        
-                        <li class="page-item <?php echo ($page >= $total_pages) ? 'disabled' : ''; ?>">
-                            <a class="page-link" href="?option=hethongIoT&page=<?php echo $page + 1; ?>" aria-label="Next">
-                                <span aria-hidden="true">&raquo;</span>
-                            </a>
-                        </li>
-                    </ul>
-                </nav>
-            <?php endif; ?>
-        </div>
-        
-        <!-- Tab trạng thái thiết bị -->
-        <div class="tab-pane fade" id="status" role="tabpanel" aria-labelledby="status-tab">
-            <div class="row mb-4">
-                <div class="col-md-12">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Theo dõi thiết bị IoT</h5>
-                            <p class="card-text">Hiển thị trạng thái hiện tại của các thiết bị.</p>
-                            
-                            <div class="row" id="device-status-cards">
-                                <!-- Thông tin trạng thái thiết bị sẽ được cập nhật bằng Ajax -->
-                                <div class="col-12 text-center my-5">
-                                    <div class="spinner-border text-primary" role="status">
-                                        <span class="visually-hidden">Đang tải...</span>
-                                    </div>
-                                    <p class="mt-2">Đang tải dữ liệu thiết bị...</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal thêm thiết bị mới -->
-<div class="modal fade" id="addDeviceModal" tabindex="-1" aria-labelledby="addDeviceModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="addDeviceModalLabel">Thêm thiết bị IoT mới</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <form method="post" action="">
-                <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="device_code">Mã thiết bị <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="device_code" name="device_code" required>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="device_name">Tên thiết bị <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="device_name" name="device_name" required>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="device_type">Loại thiết bị <span class="text-danger">*</span></label>
-                                <select class="form-control" id="device_type" name="device_type" required>
-                                    <option value="RFID_SCANNER">RFID Scanner</option>
-                                    <option value="BARCODE_SCANNER">Barcode Scanner</option>
-                                    <option value="TEMPERATURE_SENSOR">Cảm biến nhiệt độ</option>
-                                    <option value="OTHER">Khác</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="warehouse_id">Kho hàng <span class="text-danger">*</span></label>
-                                <select class="form-control" id="warehouse_id" name="warehouse_id" required>
-                                    <option value="">Chọn kho hàng</option>
-                                    <?php foreach ($warehouses as $warehouse): ?>
-                                        <option value="<?php echo $warehouse['warehouse_id']; ?>">
-                                            <?php echo htmlspecialchars($warehouse['warehouse_name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="zone_id">Khu vực</label>
-                                <select class="form-control" id="zone_id" name="zone_id">
-                                    <option value="">Chọn khu vực</option>
-                                    <!-- Khu vực sẽ được nạp bằng Ajax khi chọn kho hàng -->
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="status">Trạng thái</label>
-                                <select class="form-control" id="status" name="status">
-                                    <option value="ACTIVE">Hoạt động</option>
-                                    <option value="INACTIVE">Không hoạt động</option>
-                                    <option value="MAINTENANCE">Đang bảo trì</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="mac_address">Địa chỉ MAC</label>
-                                <input type="text" class="form-control" id="mac_address" name="mac_address">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="ip_address">Địa chỉ IP</label>
-                                <input type="text" class="form-control" id="ip_address" name="ip_address">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group mb-3">
-                        <label for="firmware_version">Phiên bản firmware</label>
-                        <input type="text" class="form-control" id="firmware_version" name="firmware_version">
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                    <button type="submit" name="add_device" class="btn btn-primary">Thêm thiết bị</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal sửa thiết bị -->
-<div class="modal fade" id="editDeviceModal" tabindex="-1" aria-labelledby="editDeviceModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="editDeviceModalLabel">Sửa thông tin thiết bị</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <form method="post" action="">
-                <div class="modal-body">
-                    <input type="hidden" id="edit_device_id" name="device_id">
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_device_code">Mã thiết bị</label>
-                                <input type="text" class="form-control" id="edit_device_code" readonly>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_device_name">Tên thiết bị <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="edit_device_name" name="device_name" required>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_device_type">Loại thiết bị <span class="text-danger">*</span></label>
-                                <select class="form-control" id="edit_device_type" name="device_type" required>
-                                    <option value="RFID_SCANNER">RFID Scanner</option>
-                                    <option value="BARCODE_SCANNER">Barcode Scanner</option>
-                                    <option value="TEMPERATURE_SENSOR">Cảm biến nhiệt độ</option>
-                                    <option value="OTHER">Khác</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_warehouse_id">Kho hàng <span class="text-danger">*</span></label>
-                                <select class="form-control" id="edit_warehouse_id" name="warehouse_id" required>
-                                    <option value="">Chọn kho hàng</option>
-                                    <?php foreach ($warehouses as $warehouse): ?>
-                                        <option value="<?php echo $warehouse['warehouse_id']; ?>">
-                                            <?php echo htmlspecialchars($warehouse['warehouse_name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_zone_id">Khu vực</label>
-                                <select class="form-control" id="edit_zone_id" name="zone_id">
-                                    <option value="">Chọn khu vực</option>
-                                    <!-- Khu vực sẽ được nạp bằng Ajax khi chọn kho hàng -->
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_status">Trạng thái</label>
-                                <select class="form-control" id="edit_status" name="status">
-                                    <option value="ACTIVE">Hoạt động</option>
-                                    <option value="INACTIVE">Không hoạt động</option>
-                                    <option value="MAINTENANCE">Đang bảo trì</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_mac_address">Địa chỉ MAC</label>
-                                <input type="text" class="form-control" id="edit_mac_address" name="mac_address">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_ip_address">Địa chỉ IP</label>
-                                <input type="text" class="form-control" id="edit_ip_address" name="ip_address">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_firmware_version">Phiên bản firmware</label>
-                                <input type="text" class="form-control" id="edit_firmware_version" name="firmware_version">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group mb-3">
-                                <label for="edit_last_maintenance_date">Bảo trì cuối cùng</label>
-                                <input type="date" class="form-control" id="edit_last_maintenance_date" name="last_maintenance_date">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group mb-3">
-                        <label for="edit_next_maintenance_date">Bảo trì tiếp theo</label>
-                        <input type="date" class="form-control" id="edit_next_maintenance_date" name="next_maintenance_date">
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                    <button type="submit" name="update_device" class="btn btn-primary">Cập nhật</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal xóa thiết bị -->
-<div class="modal fade" id="deleteDeviceModal" tabindex="-1" aria-labelledby="deleteDeviceModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deleteDeviceModalLabel">Xác nhận xóa thiết bị</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>Bạn có chắc chắn muốn xóa thiết bị "<span id="delete_device_name"></span>"?</p>
-                <p class="text-danger">Lưu ý: Hành động này không thể hoàn tác.</p>
-            </div>
-            <div class="modal-footer">
-                <form method="post" action="">
-                    <input type="hidden" id="delete_device_id" name="device_id">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                    <button type="submit" name="delete_device" class="btn btn-danger">Xóa</button>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal chi tiết trạng thái thiết bị -->
-<div class="modal fade" id="deviceStatusModal" tabindex="-1" aria-labelledby="deviceStatusModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deviceStatusModalLabel">Trạng thái thiết bị: <span id="status_device_name"></span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-body">
-                                <h5 class="card-title">Thông tin hiện tại</h5>
-                                <div id="device_status_info">
-                                    <div class="text-center my-3">
-                                        <div class="spinner-border text-primary" role="status">
-                                            <span class="visually-hidden">Đang tải...</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-body">
-                                <h5 class="card-title">Cập nhật trạng thái</h5>
-                                <form id="update_status_form" method="post" action="">
-                                    <input type="hidden" id="status_update_device_id" name="device_id">
-                                    
-                                    <div class="form-group mb-3">
-                                        <label for="power_status">Trạng thái nguồn</label>
-                                        <select class="form-control" id="power_status" name="power_status">
-                                            <option value="ON">Bật</option>
-                                            <option value="OFF">Tắt</option>
-                                            <option value="SLEEP">Ngủ</option>
-                                        </select>
-                                    </div>
-                                    
-                                    <div class="form-group mb-3">
-                                        <label for="battery_level">Mức pin (%)</label>
-                                        <input type="number" class="form-control" id="battery_level" name="battery_level" min="0" max="100" value="100">
-                                    </div>
-                                    
-                                    <div class="form-check mb-3">
-                                        <input type="checkbox" class="form-check-input" id="is_error" name="is_error">
-                                        <label class="form-check-label" for="is_error">Thiết bị đang gặp lỗi</label>
-                                    </div>
-                                    
-                                    <div class="form-group mb-3" id="error_message_group" style="display: none;">
-                                        <label for="error_message">Thông báo lỗi</label>
-                                        <textarea class="form-control" id="error_message" name="error_message" rows="3"></textarea>
-                                    </div>
-                                    
-                                    <button type="submit" name="update_device_status" class="btn btn-primary">Cập nhật trạng thái</button>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <h5>Lịch sử trạng thái</h5>
+            <div class="function-container">
                 <div class="table-responsive">
-                    <table class="table table-striped">
+                    <table class="table data-table">
                         <thead>
                             <tr>
-                                <th>Thời gian</th>
+                                <th>Mã thiết bị</th>
+                                <th>Tên thiết bị</th>
+                                <th>Loại thiết bị</th>
+                                <th>Vị trí</th>
+                                <th>Địa chỉ MAC</th>
+                                <th>Địa chỉ IP</th>
+                                <th>Firmware</th>
                                 <th>Trạng thái</th>
-                                <th>Mức pin</th>
-                                <th>Tình trạng</th>
+                                <th>Thao tác</th>
                             </tr>
                         </thead>
-                        <tbody id="device_status_history">
-                            <tr>
-                                <td colspan="4" class="text-center">Đang tải lịch sử...</td>
-                            </tr>
+                        <tbody>
+                            <?php if (count($devices) > 0): ?>
+                                <?php foreach ($devices as $device): ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($device['device_code']); ?></td>
+                                        <td><?php echo htmlspecialchars($device['device_name']); ?></td>
+                                        <td>
+                                            <?php 
+                                            switch ($device['device_type']) {
+                                                case 'RFID_SCANNER':
+                                                    echo '<span class="badge bg-primary">Máy quét RFID</span>';
+                                                    break;
+                                                case 'BARCODE_SCANNER':
+                                                    echo '<span class="badge bg-success">Máy quét mã vạch</span>';
+                                                    break;
+                                                case 'TEMPERATURE_SENSOR':
+                                                    echo '<span class="badge bg-info">Cảm biến nhiệt độ</span>';
+                                                    break;
+                                                default:
+                                                    echo '<span class="badge bg-secondary">Khác</span>';
+                                            }
+                                            ?>
+                                        </td>
+                                        <td>
+                                            <?php 
+                                            if ($device['warehouse_name']) {
+                                                echo htmlspecialchars($device['warehouse_name']);
+                                                if ($device['zone_code']) {
+                                                    echo ' - Khu ' . htmlspecialchars($device['zone_code']);
+                                                }
+                                            } else {
+                                                echo 'Chưa gán';
+                                            }
+                                            ?>
+                                        </td>
+                                        <td><?php echo htmlspecialchars($device['mac_address'] ?? 'N/A'); ?></td>
+                                        <td><?php echo htmlspecialchars($device['ip_address'] ?? 'N/A'); ?></td>
+                                        <td><?php echo htmlspecialchars($device['firmware_version'] ?? 'N/A'); ?></td>
+                                        <td>
+                                            <?php if ($device['status'] == 'ACTIVE'): ?>
+                                                <span class="badge bg-success">Hoạt động</span>
+                                            <?php elseif ($device['status'] == 'INACTIVE'): ?>
+                                                <span class="badge bg-danger">Không hoạt động</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-warning">Bảo trì</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <div class="action-buttons">
+                                                <button class="btn-edit" onclick="showEditDeviceModal(<?php echo $device['device_id']; ?>)">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button class="btn-delete" onclick="confirmDeleteDevice(<?php echo $device['device_id']; ?>)">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                                <button class="btn-toggle" onclick="showDeviceStatus(<?php echo $device['device_id']; ?>)">
+                                                    <i class="fas fa-info-circle"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr>
+                                    <td colspan="9" class="text-center">Không có thiết bị nào</td>
+                                </tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+        </div>
+
+        <!-- Trạng thái Tab -->
+        <div class="tab-pane fade" id="status" role="tabpanel" aria-labelledby="status-tab">
+            <div class="function-container">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <select class="form-select" id="deviceFilter" onchange="loadDeviceStatus()">
+                            <option value="0">Tất cả thiết bị</option>
+                            <?php foreach ($devices as $device): ?>
+                                <option value="<?php echo $device['device_id']; ?>">
+                                    <?php echo htmlspecialchars($device['device_name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-primary" onclick="loadDeviceStatus()">
+                            <i class="fas fa-sync-alt me-2"></i>Cập nhật
+                        </button>
+                    </div>
+                </div>
+
+                <div id="deviceStatusContainer">
+                    <div class="row" id="deviceStatusCards">
+                        <!-- Thẻ trạng thái thiết bị sẽ được tải bằng AJAX -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nhật ký Tab -->
+        <div class="tab-pane fade" id="logs" role="tabpanel" aria-labelledby="logs-tab">
+            <div class="function-container">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <select class="form-select" id="logDeviceFilter" onchange="loadDeviceLogs()">
+                            <option value="0">Tất cả thiết bị</option>
+                            <?php foreach ($devices as $device): ?>
+                                <option value="<?php echo $device['device_id']; ?>">
+                                    <?php echo htmlspecialchars($device['device_name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="logTypeFilter" onchange="loadDeviceLogs()">
+                            <option value="all">Tất cả loại nhật ký</option>
+                            <option value="status">Thay đổi trạng thái</option>
+                            <option value="error">Lỗi thiết bị</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-primary" onclick="loadDeviceLogs()">
+                            <i class="fas fa-sync-alt me-2"></i>Cập nhật
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table data-table">
+                        <thead>
+                            <tr>
+                                <th>Thời gian</th>
+                                <th>Thiết bị</th>
+                                <th>Trạng thái nguồn</th>
+                                <th>Mức pin</th>
+                                <th>Lỗi</th>
+                                <th>Thông báo lỗi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deviceLogsTable">
+                            <!-- Dữ liệu nhật ký sẽ được tải bằng AJAX -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
+<!-- Modal Thêm Thiết bị -->
+<div class="custom-modal" id="addDeviceModal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h5 class="modal-title">Thêm thiết bị mới</h5>
+            <button type="button" class="modal-close" onclick="closeModal('addDeviceModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="addDeviceForm">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="device_code">Mã thiết bị <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="device_code" name="device_code" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="device_name">Tên thiết bị <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="device_name" name="device_name" required>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="device_type">Loại thiết bị</label>
+                            <select class="form-control" id="device_type" name="device_type">
+                                <option value="RFID_SCANNER">Máy quét RFID</option>
+                                <option value="BARCODE_SCANNER">Máy quét mã vạch</option>
+                                <option value="TEMPERATURE_SENSOR">Cảm biến nhiệt độ</option>
+                                <option value="OTHER">Khác</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="warehouse_id">Kho</label>
+                            <select class="form-control" id="warehouse_id" name="warehouse_id" onchange="loadZones(this.value)">
+                                <option value="">Chọn kho</option>
+                                <?php foreach ($warehouses as $warehouse): ?>
+                                    <option value="<?php echo $warehouse['warehouse_id']; ?>">
+                                        <?php echo htmlspecialchars($warehouse['warehouse_name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="zone_id">Khu vực</label>
+                            <select class="form-control" id="zone_id" name="zone_id" disabled>
+                                <option value="">Chọn khu vực</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="mac_address">Địa chỉ MAC</label>
+                            <input type="text" class="form-control" id="mac_address" name="mac_address">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="ip_address">Địa chỉ IP</label>
+                            <input type="text" class="form-control" id="ip_address" name="ip_address">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="firmware_version">Phiên bản firmware</label>
+                            <input type="text" class="form-control" id="firmware_version" name="firmware_version">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="last_maintenance_date">Ngày bảo trì cuối</label>
+                            <input type="date" class="form-control" id="last_maintenance_date" name="last_maintenance_date">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="next_maintenance_date">Ngày bảo trì tiếp theo</label>
+                            <input type="date" class="form-control" id="next_maintenance_date" name="next_maintenance_date">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="status">Trạng thái</label>
+                    <select class="form-control" id="status" name="status">
+                        <option value="ACTIVE">Hoạt động</option>
+                        <option value="INACTIVE">Không hoạt động</option>
+                        <option value="MAINTENANCE">Bảo trì</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('addDeviceModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="saveDevice()">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Chỉnh sửa Thiết bị -->
+<div class="custom-modal" id="editDeviceModal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h5 class="modal-title">Chỉnh sửa thiết bị</h5>
+            <button type="button" class="modal-close" onclick="closeModal('editDeviceModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="editDeviceForm">
+                <input type="hidden" id="edit_device_id" name="device_id">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_device_code">Mã thiết bị <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit_device_code" name="device_code" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_device_name">Tên thiết bị <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit_device_name" name="device_name" required>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_device_type">Loại thiết bị</label>
+                            <select class="form-control" id="edit_device_type" name="device_type">
+                                <option value="RFID_SCANNER">Máy quét RFID</option>
+                                <option value="BARCODE_SCANNER">Máy quét mã vạch</option>
+                                <option value="TEMPERATURE_SENSOR">Cảm biến nhiệt độ</option>
+                                <option value="OTHER">Khác</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_warehouse_id">Kho</label>
+                            <select class="form-control" id="edit_warehouse_id" name="warehouse_id" onchange="loadZones(this.value, 'edit')">
+                                <option value="">Chọn kho</option>
+                                <?php foreach ($warehouses as $warehouse): ?>
+                                    <option value="<?php echo $warehouse['warehouse_id']; ?>">
+                                        <?php echo htmlspecialchars($warehouse['warehouse_name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_zone_id">Khu vực</label>
+                            <select class="form-control" id="edit_zone_id" name="zone_id">
+                                <option value="">Chọn khu vực</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_mac_address">Địa chỉ MAC</label>
+                            <input type="text" class="form-control" id="edit_mac_address" name="mac_address">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_ip_address">Địa chỉ IP</label>
+                            <input type="text" class="form-control" id="edit_ip_address" name="ip_address">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_firmware_version">Phiên bản firmware</label>
+                            <input type="text" class="form-control" id="edit_firmware_version" name="firmware_version">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_last_maintenance_date">Ngày bảo trì cuối</label>
+                            <input type="date" class="form-control" id="edit_last_maintenance_date" name="last_maintenance_date">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="edit_next_maintenance_date">Ngày bảo trì tiếp theo</label>
+                            <input type="date" class="form-control" id="edit_next_maintenance_date" name="next_maintenance_date">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_status">Trạng thái</label>
+                    <select class="form-control" id="edit_status" name="status">
+                        <option value="ACTIVE">Hoạt động</option>
+                        <option value="INACTIVE">Không hoạt động</option>
+                        <option value="MAINTENANCE">Bảo trì</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('editDeviceModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="updateDevice()">Cập nhật</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Cập nhật Trạng thái Thiết bị -->
+<div class="custom-modal" id="deviceStatusModal">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h5 class="modal-title">Cập nhật trạng thái thiết bị</h5>
+            <button type="button" class="modal-close" onclick="closeModal('deviceStatusModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="updateStatusForm">
+                <input type="hidden" id="status_device_id" name="device_id">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="power_status">Trạng thái nguồn</label>
+                            <select class="form-control" id="power_status" name="power_status">
+                                <option value="ON">Bật</option>
+                                <option value="OFF">Tắt</option>
+                                <option value="SLEEP">Ngủ</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="battery_level">Mức pin (%)</label>
+                            <input type="number" class="form-control" id="battery_level" name="battery_level" min="0" max="100" value="100">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="is_error" name="is_error" onchange="toggleErrorMessage()">
+                        <label class="form-check-label" for="is_error">
+                            Thiết bị đang gặp lỗi
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="form-group" id="error_message_group" style="display: none;">
+                    <label for="error_message">Thông báo lỗi</label>
+                    <textarea class="form-control" id="error_message" name="error_message" rows="3"></textarea>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('deviceStatusModal')">Hủy</button>
+            <button type="button" class="btn btn-primary" onclick="updateDeviceStatus()">Cập nhật</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Notifications -->
+<div class="toast-container"></div>
+
 <script>
-// Lấy danh sách khu vực dựa vào kho hàng được chọn
-function loadZones(warehouseId, targetId) {
-    fetch(`api/get_zones.php?warehouse_id=${warehouseId}`)
+// Hiển thị modal thêm thiết bị
+function showAddDeviceModal() {
+    document.getElementById('addDeviceForm').reset();
+    document.getElementById('zone_id').disabled = true;
+    document.getElementById('addDeviceModal').classList.add('show');
+}
+
+// Hiển thị modal chỉnh sửa thiết bị
+function showEditDeviceModal(deviceId) {
+    // Lấy thông tin thiết bị từ server
+    fetch('ajax/iot/ajax_handler.php?action=getDevice&device_id=' + deviceId)
         .then(response => response.json())
         .then(data => {
-            // Xóa tất cả options cũ trừ option mặc định đầu tiên
-            const selectElement = document.getElementById(targetId);
-            while (selectElement.options.length > 1) {
-                selectElement.remove(1);
+            if (data.success) {
+                const device = data.device;
+                
+                // Điền thông tin vào form
+                document.getElementById('edit_device_id').value = device.device_id;
+                document.getElementById('edit_device_code').value = device.device_code;
+                document.getElementById('edit_device_name').value = device.device_name;
+                document.getElementById('edit_device_type').value = device.device_type;
+                document.getElementById('edit_warehouse_id').value = device.warehouse_id || '';
+                document.getElementById('edit_mac_address').value = device.mac_address || '';
+                document.getElementById('edit_ip_address').value = device.ip_address || '';
+                document.getElementById('edit_firmware_version').value = device.firmware_version || '';
+                document.getElementById('edit_last_maintenance_date').value = device.last_maintenance_date || '';
+                document.getElementById('edit_next_maintenance_date').value = device.next_maintenance_date || '';
+                document.getElementById('edit_status').value = device.status;
+                
+                // Tải danh sách khu vực
+                if (device.warehouse_id) {
+                    loadZones(device.warehouse_id, 'edit', device.zone_id);
+                }
+                
+                // Hiển thị modal
+                document.getElementById('editDeviceModal').classList.add('show');
+            } else {
+                showToast('error', 'Lỗi: ' + data.message);
             }
-            
-            // Thêm options mới từ dữ liệu trả về
-            if (data.zones && data.zones.length > 0) {
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showToast('error', 'Đã xảy ra lỗi khi tải thông tin thiết bị');
+        });
+}
+
+// Hiển thị modal cập nhật trạng thái
+function showDeviceStatus(deviceId) {
+    // Reset form
+    document.getElementById('updateStatusForm').reset();
+    document.getElementById('status_device_id').value = deviceId;
+    document.getElementById('error_message_group').style.display = 'none';
+    
+    // Hiển thị modal
+    document.getElementById('deviceStatusModal').classList.add('show');
+}
+
+// Đóng modal
+function closeModal(modalId) {
+    document.getElementById(modalId).classList.remove('show');
+}
+
+// Tải danh sách khu vực theo kho
+function loadZones(warehouseId, prefix = '') {
+    const zoneSelect = document.getElementById(prefix ? `${prefix}_zone_id` : 'zone_id');
+    
+    // Reset và disable select
+    zoneSelect.innerHTML = '<option value="">Chọn khu vực</option>';
+    zoneSelect.disabled = true;
+    
+    if (!warehouseId) return;
+    
+    // Lấy danh sách khu vực từ server
+    fetch('ajax/iot/ajax_handler.php?action=getZones&warehouse_id=' + warehouseId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Thêm các option
                 data.zones.forEach(zone => {
                     const option = document.createElement('option');
                     option.value = zone.zone_id;
-                    option.textContent = zone.zone_name + ' (' + zone.zone_code + ')';
-                    selectElement.appendChild(option);
+                    option.textContent = `Khu ${zone.zone_code} - ${zone.zone_name || ''}`;
+                    zoneSelect.appendChild(option);
                 });
+                
+                // Enable select
+                zoneSelect.disabled = false;
+                
+                // Nếu có zoneId được chỉ định (khi chỉnh sửa)
+                if (prefix === 'edit' && data.selected_zone_id) {
+                    zoneSelect.value = data.selected_zone_id;
+                }
+            } else {
+                showToast('error', 'Lỗi: ' +                data.message);
             }
         })
         .catch(error => {
-            console.error('Lỗi khi tải khu vực:', error);
+            console.error('Error:', error);
+            showToast('error', 'Đã xảy ra lỗi khi tải danh sách khu vực');
         });
 }
 
-// Lấy thông tin trạng thái thiết bị
-function loadDeviceStatus(deviceId) {
-    fetch(`api/device_status.php?device_id=${deviceId}`)
-        .then(response => response.json())
-        .then(data => {
-            // Hiển thị thông tin trạng thái hiện tại
-            let statusInfo = '';
-            
-            if (data.current_status) {
-                const status = data.current_status;
-                
-                // Màu sắc trạng thái
-                let powerStatusClass = 'text-secondary';
-                if (status.power_status === 'ON') powerStatusClass = 'text-success';
-                else if (status.power_status === 'SLEEP') powerStatusClass = 'text-warning';
-                
-                // Màu sắc pin
-                let batteryClass = 'text-success';
-                if (status.battery_level <= 20) batteryClass = 'text-danger';
-                else if (status.battery_level <= 50) batteryClass = 'text-warning';
-                
-                statusInfo = `
-                    <div class="d-flex align-items-center mb-3">
-                        <div class="fs-4 me-2 ${powerStatusClass}">
-                            <i class="fas fa-power-off"></i>
-                        </div>
-                        <div>
-                            <p class="mb-0 fw-bold">Trạng thái nguồn</p>
-                            <p class="mb-0 ${powerStatusClass}">${
-                                status.power_status === 'ON' ? 'Đang bật' : 
-                                status.power_status === 'OFF' ? 'Đã tắt' : 'Chế độ ngủ'
-                            }</p>
-                        </div>
-                    </div>
-                    
-                    <div class="d-flex align-items-center mb-3">
-                        <div class="fs-4 me-2 ${batteryClass}">
-                            <i class="fas fa-battery-${Math.ceil(status.battery_level / 25) * 25}"></i>
-                        </div>
-                        <div>
-                            <p class="mb-0 fw-bold">Mức pin</p>
-                            <p class="mb-0 ${batteryClass}">${status.battery_level}%</p>
-                        </div>
-                    </div>
-                    
-                    <div class="d-flex align-items-center">
-                        <div class="fs-4 me-2 ${status.is_error ? 'text-danger' : 'text-success'}">
-                            <i class="fas ${status.is_error ? 'fa-exclamation-triangle' : 'fa-check-circle'}"></i>
-                        </div>
-                        <div>
-                            <p class="mb-0 fw-bold">Tình trạng</p>
-                            <p class="mb-0 ${status.is_error ? 'text-danger' : 'text-success'}">
-                                ${status.is_error ? 'Đang gặp lỗi' : 'Hoạt động bình thường'}
-                            </p>
-                            ${status.is_error && status.error_message ? 
-                                `<p class="mb-0 text-danger small">${status.error_message}</p>` : ''}
-                        </div>
-                    </div>
-                    
-                    <hr>
-                    <p class="text-muted small mb-0">Cập nhật: ${new Date(status.timestamp).toLocaleString()}</p>
-                `;
-            } else {
-                statusInfo = '<p class="text-center">Không có thông tin trạng thái</p>';
-            }
-            
-            document.getElementById('device_status_info').innerHTML = statusInfo;
-            
-            // Hiển thị lịch sử trạng thái
-            let historyHTML = '';
-            
-            if (data.status_history && data.status_history.length > 0) {
-                data.status_history.forEach(status => {
-                    historyHTML += `
-                        <tr>
-                            <td>${new Date(status.timestamp).toLocaleString()}</td>
-                            <td>
-                                <span class="${
-                                    status.power_status === 'ON' ? 'text-success' : 
-                                    status.power_status === 'SLEEP' ? 'text-warning' : 'text-secondary'
-                                }">
-                                    <i class="fas fa-power-off me-1"></i>
-                                    ${
-                                        status.power_status === 'ON' ? 'Bật' : 
-                                        status.power_status === 'OFF' ? 'Tắt' : 'Ngủ'
-                                    }
-                                </span>
-                            </td>
-                            <td>
-                                <span class="${
-                                    status.battery_level <= 20 ? 'text-danger' : 
-                                    status.battery_level <= 50 ? 'text-warning' : 'text-success'
-                                }">
-                                    <i class="fas fa-battery-${Math.ceil(status.battery_level / 25) * 25} me-1"></i>
-                                    ${status.battery_level}%
-                                </span>
-                            </td>
-                            <td>
-                                ${status.is_error ? 
-                                    `<span class="text-danger"><i class="fas fa-exclamation-triangle me-1"></i>Lỗi</span>
-                                     <p class="mb-0 small">${status.error_message || ''}</p>` : 
-                                    '<span class="text-success"><i class="fas fa-check-circle me-1"></i>Bình thường</span>'
-                                }
-                            </td>
-                        </tr>
-                    `;
-                });
-            } else {
-                historyHTML = '<tr><td colspan="4" class="text-center">Không có lịch sử trạng thái</td></tr>';
-            }
-            
-            document.getElementById('device_status_history').innerHTML = historyHTML;
-        })
-        .catch(error => {
-            console.error('Lỗi khi tải trạng thái thiết bị:', error);
-            document.getElementById('device_status_info').innerHTML = '<p class="text-danger">Lỗi khi tải dữ liệu</p>';
-            document.getElementById('device_status_history').innerHTML = '<tr><td colspan="4" class="text-danger">Lỗi khi tải dữ liệu</td></tr>';
-        });
+// Lưu thiết bị mới
+function saveDevice() {
+    const form = document.getElementById('addDeviceForm');
+    const formData = new FormData(form);
+    
+    fetch('ajax/iot/ajax_handler.php?action=addDevice', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('success', 'Thêm thiết bị thành công');
+            closeModal('addDeviceModal');
+            // Tải lại trang sau khi thêm thành công
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showToast('error', 'Lỗi: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('error', 'Đã xảy ra lỗi khi thêm thiết bị');
+    });
 }
 
-// Tải thông tin trạng thái tất cả thiết bị cho tab giám sát
-function loadAllDeviceStatuses() {
-    fetch('api/all_device_statuses.php')
+// Cập nhật thiết bị
+function updateDevice() {
+    const form = document.getElementById('editDeviceForm');
+    const formData = new FormData(form);
+    
+    fetch('ajax/iot/ajax_handler.php?action=updateDevice', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('success', 'Cập nhật thiết bị thành công');
+            closeModal('editDeviceModal');
+            // Tải lại trang sau khi cập nhật thành công
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showToast('error', 'Lỗi: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('error', 'Đã xảy ra lỗi khi cập nhật thiết bị');
+    });
+}
+
+// Xác nhận xóa thiết bị
+function confirmDeleteDevice(deviceId) {
+    if (confirm('Bạn có chắc chắn muốn xóa thiết bị này?')) {
+        deleteDevice(deviceId);
+    }
+}
+
+// Xóa thiết bị
+function deleteDevice(deviceId) {
+    fetch('ajax/iot/ajax_handler.php?action=deleteDevice&device_id=' + deviceId, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('success', 'Xóa thiết bị thành công');
+            // Tải lại trang sau khi xóa thành công
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            showToast('error', 'Lỗi: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('error', 'Đã xảy ra lỗi khi xóa thiết bị');
+    });
+}
+
+// Hiển thị/ẩn trường thông báo lỗi
+function toggleErrorMessage() {
+    const isError = document.getElementById('is_error').checked;
+    document.getElementById('error_message_group').style.display = isError ? 'block' : 'none';
+}
+
+// Cập nhật trạng thái thiết bị
+function updateDeviceStatus() {
+    const form = document.getElementById('updateStatusForm');
+    const formData = new FormData(form);
+    
+    // Chuyển checkbox thành boolean
+    formData.set('is_error', document.getElementById('is_error').checked ? '1' : '0');
+    
+    fetch('ajax/iot/ajax_handler.php?action=updateDeviceStatus', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('success', 'Cập nhật trạng thái thiết bị thành công');
+            closeModal('deviceStatusModal');
+            // Tải lại trạng thái thiết bị
+            loadDeviceStatus();
+        } else {
+            showToast('error', 'Lỗi: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showToast('error', 'Đã xảy ra lỗi khi cập nhật trạng thái thiết bị');
+    });
+}
+
+// Tải trạng thái thiết bị
+function loadDeviceStatus() {
+    const deviceId = document.getElementById('deviceFilter').value;
+    
+    fetch('ajax/iot/ajax_handler.php?action=getDeviceStatus&device_id=' + deviceId)
         .then(response => response.json())
         .then(data => {
-            let cardsHTML = '';
-            
-            if (data.devices && data.devices.length > 0) {
+            if (data.success) {
+                const container = document.getElementById('deviceStatusCards');
+                container.innerHTML = '';
+                
+                if (data.devices.length === 0) {
+                    container.innerHTML = '<div class="col-12 text-center">Không có dữ liệu trạng thái thiết bị</div>';
+                    return;
+                }
+                
                 data.devices.forEach(device => {
-                    // Màu sắc trạng thái
-                    let cardBorderClass = 'border-success';
-                    let statusIconClass = 'text-success';
-                    let statusText = 'Hoạt động bình thường';
-                    
-                    if (device.is_error) {
-                        cardBorderClass = 'border-danger';
-                        statusIconClass = 'text-danger';
-                        statusText = 'Đang gặp lỗi';
+                    let statusColor = 'success';
+                    if (device.is_error === '1') {
+                        statusColor = 'danger';
                     } else if (device.power_status === 'OFF') {
-                        cardBorderClass = 'border-secondary';
-                        statusIconClass = 'text-secondary';
-                        statusText = 'Thiết bị đã tắt';
+                        statusColor = 'secondary';
                     } else if (device.power_status === 'SLEEP') {
-                        cardBorderClass = 'border-warning';
-                        statusIconClass = 'text-warning';
-                        statusText = 'Chế độ ngủ';
-                    } else if (device.battery_level <= 20) {
-                        cardBorderClass = 'border-danger';
-                        statusIconClass = 'text-danger';
-                        statusText = 'Pin yếu';
+                        statusColor = 'warning';
+                    } else if (device.battery_level < 20) {
+                        statusColor = 'warning';
                     }
                     
-                    cardsHTML += `
+                    let batteryIcon = '';
+                    if (device.battery_level >= 80) {
+                        batteryIcon = '<i class="fas fa-battery-full"></i>';
+                    } else if (device.battery_level >= 50) {
+                        batteryIcon = '<i class="fas fa-battery-three-quarters"></i>';
+                    } else if (device.battery_level >= 30) {
+                        batteryIcon = '<i class="fas fa-battery-half"></i>';
+                    } else if (device.battery_level >= 10) {
+                        batteryIcon = '<i class="fas fa-battery-quarter"></i>';
+                    } else {
+                        batteryIcon = '<i class="fas fa-battery-empty"></i>';
+                    }
+                    
+                    const card = `
                         <div class="col-md-4 mb-4">
-                            <div class="card h-100 ${cardBorderClass}" style="border-width: 2px;">
-                                <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
-                                    <h6 class="mb-0">${device.device_name}</h6>
-                                    <span class="badge ${
-                                        device.device_type === 'RFID_SCANNER' ? 'bg-primary' : 
-                                        device.device_type === 'BARCODE_SCANNER' ? 'bg-info' : 
-                                        device.device_type === 'TEMPERATURE_SENSOR' ? 'bg-success' : 'bg-secondary'
-                                    }">
-                                        ${
-                                            device.device_type === 'RFID_SCANNER' ? 'RFID Scanner' : 
-                                            device.device_type === 'BARCODE_SCANNER' ? 'Barcode Scanner' : 
-                                            device.device_type === 'TEMPERATURE_SENSOR' ? 'Nhiệt độ' : 'Khác'
-                                        }
-                                    </span>
+                            <div class="card border-${statusColor}">
+                                <div class="card-header bg-${statusColor} text-white">
+                                    <h5 class="mb-0">${device.device_name}</h5>
                                 </div>
                                 <div class="card-body">
-                                    <div class="d-flex align-items-center mb-3">
-                                        <div class="fs-4 me-2 ${
-                                            device.power_status === 'ON' ? 'text-success' : 
-                                            device.power_status === 'SLEEP' ? 'text-warning' : 'text-secondary'
-                                        }">
-                                            <i class="fas fa-power-off"></i>
-                                        </div>
-                                        <div>
-                                            <p class="mb-0 small">Trạng thái</p>
-                                            <p class="mb-0 fw-bold ${
-                                                device.power_status === 'ON' ? 'text-success' : 
-                                                device.power_status === 'SLEEP' ? 'text-warning' : 'text-secondary'
-                                            }">
-                                                ${
-                                                    device.power_status === 'ON' ? 'Đang bật' : 
-                                                    device.power_status === 'OFF' ? 'Đã tắt' : 'Chế độ ngủ'
-                                                }
-                                            </p>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="d-flex align-items-center mb-3">
-                                        <div class="fs-4 me-2 ${
-                                            device.battery_level <= 20 ? 'text-danger' : 
-                                            device.battery_level <= 50 ? 'text-warning' : 'text-success'
-                                        }">
-                                            <i class="fas fa-battery-${Math.ceil(device.battery_level / 25) * 25}"></i>
-                                        </div>
-                                        <div>
-                                            <p class="mb-0 small">Pin</p>
-                                            <p class="mb-0 fw-bold ${
-                                                device.battery_level <= 20 ? 'text-danger' : 
-                                                device.battery_level <= 50 ? 'text-warning' : 'text-success'
-                                            }">
-                                                ${device.battery_level}%
-                                            </p>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="d-flex align-items-start">
-                                        <div class="fs-4 me-2 ${statusIconClass}">
-                                            <i class="fas ${device.is_error ? 'fa-exclamation-triangle' : 'fa-check-circle'}"></i>
-                                        </div>
-                                        <div>
-                                            <p class="mb-0 small">Tình trạng</p>
-                                            <p class="mb-0 fw-bold ${statusIconClass}">
-                                                ${statusText}
-                                            </p>
-                                            ${device.is_error && device.error_message ? 
-                                                `<p class="mb-0 text-danger small mt-1">${device.error_message}</p>` : ''}
-                                        </div>
-                                    </div>
+                                    <p><strong>Mã thiết bị:</strong> ${device.device_code}</p>
+                                    <p><strong>Loại thiết bị:</strong> ${getDeviceTypeName(device.device_type)}</p>
+                                    <p><strong>Trạng thái nguồn:</strong> ${getPowerStatusName(device.power_status)}</p>
+                                    <p><strong>Mức pin:</strong> ${batteryIcon} ${device.battery_level}%</p>
+                                    ${device.is_error === '1' ? `<p class="text-danger"><strong>Lỗi:</strong> ${device.error_message || 'Không xác định'}</p>` : ''}
+                                    <p><strong>Cập nhật lúc:</strong> ${formatDateTime(device.timestamp)}</p>
                                 </div>
-                                <div class="card-footer bg-transparent text-muted small">
-                                    <div class="d-flex justify-content-between">
-                                        <span>Vị trí: ${device.warehouse_name}${device.zone_name ? ' - ' + device.zone_name : ''}</span>
-                                        <button type="button" class="btn btn-sm btn-outline-primary" 
-                                            data-bs-toggle="modal" data-bs-target="#deviceStatusModal" 
-                                            data-device-id="${device.device_id}" 
-                                            data-device-name="${device.device_name}">
-                                            Chi tiết
-                                        </button>
-                                    </div>
+                                <div class="card-footer">
+                                    <button class="btn btn-sm btn-primary" onclick="showDeviceStatus(${device.device_id})">
+                                        <i class="fas fa-edit me-1"></i>Cập nhật trạng thái
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     `;
+                    
+                    container.innerHTML += card;
                 });
             } else {
-                cardsHTML = '<div class="col-12 text-center">Không có thiết bị nào</div>';
+                showToast('error', 'Lỗi: ' + data.message);
             }
-            
-            document.getElementById('device-status-cards').innerHTML = cardsHTML;
         })
         .catch(error => {
-            console.error('Lỗi khi tải trạng thái thiết bị:', error);
-            document.getElementById('device-status-cards').innerHTML = 
-                '<div class="col-12 text-center text-danger">Lỗi khi tải dữ liệu thiết bị</div>';
+            console.error('Error:', error);
+            showToast('error', 'Đã xảy ra lỗi khi tải trạng thái thiết bị');
         });
 }
 
-// Xử lý khi chọn kho hàng trong modal thêm mới
-document.getElementById('warehouse_id').addEventListener('change', function() {
-    const warehouseId = this.value;
-    if (warehouseId) {
-        loadZones(warehouseId, 'zone_id');
-    }
-});
-
-// Xử lý khi chọn kho hàng trong modal chỉnh sửa
-document.getElementById('edit_warehouse_id').addEventListener('change', function() {
-    const warehouseId = this.value;
-    if (warehouseId) {
-        loadZones(warehouseId, 'edit_zone_id');
-    }
-});
-
-// Xử lý hiển thị/ẩn trường thông báo lỗi
-document.getElementById('is_error').addEventListener('change', function() {
-    document.getElementById('error_message_group').style.display = this.checked ? 'block' : 'none';
-});
-
-// Tải trạng thái thiết bị khi chuyển tab
-document.getElementById('status-tab').addEventListener('click', function() {
-    loadAllDeviceStatuses();
-});
-
-// Xử lý khi mở modal chỉnh sửa
-document.getElementById('editDeviceModal').addEventListener('show.bs.modal', function(event) {
-    const button = event.relatedTarget;
-    const deviceData = JSON.parse(button.getAttribute('data-device'));
+// Tải nhật ký thiết bị
+function loadDeviceLogs() {
+    const deviceId = document.getElementById('logDeviceFilter').value;
+    const logType = document.getElementById('logTypeFilter').value;
     
-    // Điền dữ liệu vào form
-    document.getElementById('edit_device_id').value = deviceData.device_id;
-    document.getElementById('edit_device_code').value = deviceData.device_code;
-    document.getElementById('edit_device_name').value = deviceData.device_name;
-    document.getElementById('edit_device_type').value = deviceData.device_type;
-    document.getElementById('edit_warehouse_id').value = deviceData.warehouse_id;
-    loadZones(deviceData.warehouse_id, 'edit_zone_id');
-    
-    // Xử lý các trường có thể null
-    setTimeout(() => {
-        if (deviceData.zone_id) {
-            document.getElementById('edit_zone_id').value = deviceData.zone_id;
-        }
-    }, 500);
-    
-    document.getElementById('edit_status').value = deviceData.status;
-    document.getElementById('edit_mac_address').value = deviceData.mac_address || '';
-    document.getElementById('edit_ip_address').value = deviceData.ip_address || '';
-    document.getElementById('edit_firmware_version').value = deviceData.firmware_version || '';
-    
-    if (deviceData.last_maintenance_date) {
-        document.getElementById('edit_last_maintenance_date').value = deviceData.last_maintenance_date.split(' ')[0];
-    } else {
-        document.getElementById('edit_last_maintenance_date').value = '';
-    }
-    
-    if (deviceData.next_maintenance_date) {
-        document.getElementById('edit_next_maintenance_date').value = deviceData.next_maintenance_date.split(' ')[0];
-    } else {
-        document.getElementById('edit_next_maintenance_date').value = '';
-    }
-});
-
-// Xử lý khi mở modal xóa
-document.getElementById('deleteDeviceModal').addEventListener('show.bs.modal', function(event) {
-    const button = event.relatedTarget;
-    const deviceId = button.getAttribute('data-device-id');
-    const deviceName = button.getAttribute('data-device-name');
-    
-    document.getElementById('delete_device_id').value = deviceId;
-    document.getElementById('delete_device_name').textContent = deviceName;
-});
-
-// Xử lý khi mở modal trạng thái thiết bị
-document.getElementById('deviceStatusModal').addEventListener('show.bs.modal', function(event) {
-    const button = event.relatedTarget;
-    const deviceId = button.getAttribute('data-device-id');
-    const deviceName = button.getAttribute('data-device-name');
-    
-    document.getElementById('status_device_name').textContent = deviceName;
-    document.getElementById('status_update_device_id').value = deviceId;
-    
-    // Tải thông tin trạng thái thiết bị
-    loadDeviceStatus(deviceId);
-});
-
-// Tự động cập nhật trạng thái thiết bị định kỳ
-let statusUpdateInterval;
-
-document.getElementById('status-tab').addEventListener('shown.bs.tab', function() {
-    // Bắt đầu cập nhật trạng thái mỗi 30 giây
-    statusUpdateInterval = setInterval(loadAllDeviceStatuses, 30000);
-});
-
-document.getElementById('devices-tab').addEventListener('shown.bs.tab', function() {
-    // Dừng cập nhật khi chuyển sang tab khác
-    clearInterval(statusUpdateInterval);
-});
-
-// Tải trạng thái ban đầu nếu tab đang hiện
-if (document.getElementById('status-tab').classList.contains('active')) {
-    loadAllDeviceStatuses();
+    fetch(`ajax/iot/ajax_handler.php?action=getDeviceLogs&device_id=${deviceId}&log_type=${logType}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const tableBody = document.getElementById('deviceLogsTable');
+                tableBody.innerHTML = '';
+                
+                if (data.logs.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="6" class="text-center">Không có dữ liệu nhật ký</td></tr>';
+                    return;
+                }
+                
+                data.logs.forEach(log => {
+                    const row = `
+                        <tr>
+                            <td>${formatDateTime(log.timestamp)}</td>
+                            <td>${log.device_name}</td>
+                            <td>${getPowerStatusName(log.power_status)}</td>
+                            <td>${log.battery_level}%</td>
+                            <td>${log.is_error === '1' ? '<span class="badge bg-danger">Có</span>' : '<span class="badge bg-success">Không</span>'}</td>
+                            <td>${log.error_message || '-'}</td>
+                        </tr>
+                    `;
+                    
+                    tableBody.innerHTML += row;
+                });
+            } else {
+                showToast('error', 'Lỗi: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showToast('error', 'Đã xảy ra lỗi khi tải nhật ký thiết bị');
+        });
 }
+
+// Hiển thị thông báo toast
+function showToast(type, message) {
+    const toastContainer = document.querySelector('.toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    toast.innerHTML = `
+        <div class="toast-icon">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+        </div>
+        <div class="toast-message">${message}</div>
+    `;
+    
+    toastContainer.appendChild(toast);
+    
+    // Tự động xóa toast sau 3 giây
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
+// Định dạng thời gian
+function formatDateTime(dateTimeStr) {
+    const date = new Date(dateTimeStr);
+    return date.toLocaleString('vi-VN');
+}
+
+// Lấy tên loại thiết bị
+function getDeviceTypeName(type) {
+    switch (type) {
+        case 'RFID_SCANNER':
+            return 'Máy quét RFID';
+        case 'BARCODE_SCANNER':
+            return 'Máy quét mã vạch';
+        case 'TEMPERATURE_SENSOR':
+            return 'Cảm biến nhiệt độ';
+        default:
+            return 'Khác';
+    }
+}
+
+// Lấy tên trạng thái nguồn
+function getPowerStatusName(status) {
+    switch (status) {
+        case 'ON':
+            return 'Bật';
+        case 'OFF':
+            return 'Tắt';
+        case 'SLEEP':
+            return 'Ngủ';
+        default:
+            return 'Không xác định';
+    }
+}
+
+// Tải dữ liệu khi trang được tải
+document.addEventListener('DOMContentLoaded', function() {
+    // Tải trạng thái thiết bị khi chuyển đến tab trạng thái
+    document.getElementById('status-tab').addEventListener('shown.bs.tab', function() {
+        loadDeviceStatus();
+    });
+    
+    // Tải nhật ký thiết bị khi chuyển đến tab nhật ký
+    document.getElementById('logs-tab').addEventListener('shown.bs.tab', function() {
+        loadDeviceLogs();
+    });
+});
 </script>

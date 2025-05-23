@@ -676,7 +676,7 @@ document.addEventListener('DOMContentLoaded', function() {
             integrityResults.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin me-2"></i>Đang kiểm tra toàn vẹn dữ liệu...</div>';
             
             // Gửi AJAX request để kiểm tra
-            fetch('ajax/check_data_integrity.php')
+            fetch('ajax/dulieu/kiemTraToanVenDuLieu.php')
                 .then(response => response.json())
                 .then(data => {
                     let html = '';
@@ -714,7 +714,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             // Gửi request để sửa lỗi
                             integrityResults.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin me-2"></i>Đang sửa lỗi toàn vẹn dữ liệu...</div>';
                             
-                            fetch('ajax/fix_data_integrity.php')
+                            fetch('ajax/dulieu/suaToanVenDuLieu.php')
                                 .then(response => response.json())
                                 .then(data => {
                                     if (data.success) {

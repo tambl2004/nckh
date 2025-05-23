@@ -126,7 +126,7 @@ $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory_update';
                 <div class="tab-pane active">
                     <div class="row">
                         <div class="col-md-12 mb-4">
-                            <div class="card">
+                            <div class="function-container mb-4">
                                 <div class="card-header">
                                     <h5 class="card-title mb-0">Tình trạng cập nhật tồn kho</h5>
                                 </div>
@@ -153,7 +153,7 @@ $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory_update';
                         </div>
 
                         <div class="col-md-12">
-                            <div class="card">
+                            <div class="function-container mb-2">
                                 <div class="card-header d-flex justify-content-between align-items-center">
                                     <h5 class="card-title mb-0">Di chuyển kho gần đây</h5>
                                     <button class="btn btn-primary btn-sm" onclick="window.location.href='admin.php?option=kho'">
@@ -239,7 +239,7 @@ $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory_update';
                     
                     <div class="row">
                         <div class="col-md-12">
-                            <div class="card">
+                            <div class="function-container mb-2">
                                 <div class="card-header">
                                     <h5 class="card-title mb-0">Cảnh báo đang hoạt động</h5>
                                 </div>
@@ -298,7 +298,7 @@ $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory_update';
 
                     <div class="row mt-4">
                         <div class="col-md-6">
-                            <div class="card">
+                            <div class="function-container mb-2">
                                 <div class="card-header">
                                     <h5 class="card-title mb-0">Cấu hình cảnh báo tồn kho thấp</h5>
                                 </div>
@@ -339,7 +339,7 @@ $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory_update';
                 <div class="tab-pane active">
                     <div class="row">
                         <div class="col-md-6">
-                            <div class="card">
+                            <div class="function-container mb-2">
                                 <div class="card-header">
                                     <h5 class="card-title mb-0">Gợi ý vị trí kệ tối ưu khi nhập kho</h5>
                                 </div>
@@ -409,7 +409,7 @@ $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory_update';
                         </div>
                         
                         <div class="col-md-6">
-                            <div class="card">
+                            <div class="function-container mb-2">
                                 <div class="card-header">
                                     <h5 class="card-title mb-0">Đề xuất vị trí dựa trên tần suất xuất/nhập</h5>
                                 </div>

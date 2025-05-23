@@ -1,6 +1,413 @@
 <?php
 // Kết nối đến cơ sở dữ liệu
 include_once 'config/connect.php';
+
+// Lấy các tham số từ URL (nếu có)
+$current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'inventory';
+$warehouse_filter = isset($_GET['warehouse']) ? $_GET['warehouse'] : '';
+$category_filter = isset($_GET['category']) ? $_GET['category'] : '';
+$stock_level_filter = isset($_GET['stock_level']) ? $_GET['stock_level'] : '';
+$date_range = isset($_GET['date_range']) ? $_GET['date_range'] : '30';
+$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : '';
+$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : '';
+$days_threshold = isset($_GET['days_threshold']) ? $_GET['days_threshold'] : '30';
+
+// Truy vấn dữ liệu báo cáo tồn kho
+$inventory_sql = "SELECT p.product_code, p.product_name, c.category_name, w.warehouse_name, 
+                  i.quantity, p.price, i.quantity * p.price as total_value, p.minimum_stock,
+                  CASE 
+                     WHEN i.quantity <= p.minimum_stock THEN 'Thấp' 
+                     WHEN i.quantity <= p.minimum_stock * 1.5 THEN 'Trung bình' 
+                     ELSE 'Cao' 
+                  END AS stock_level 
+                  FROM inventory i
+                  JOIN products p ON i.product_id = p.product_id
+                  JOIN categories c ON p.category_id = c.category_id
+                  JOIN warehouses w ON i.warehouse_id = w.warehouse_id
+                  WHERE 1=1";
+
+if (!empty($warehouse_filter)) {
+    $inventory_sql .= " AND i.warehouse_id = $warehouse_filter";
+}
+
+if (!empty($category_filter)) {
+    $inventory_sql .= " AND p.category_id = $category_filter";
+}
+
+if (!empty($stock_level_filter)) {
+    $inventory_sql .= " AND (CASE 
+                              WHEN i.quantity <= p.minimum_stock THEN 'Thấp' 
+                              WHEN i.quantity <= p.minimum_stock * 1.5 THEN 'Trung bình' 
+                              ELSE 'Cao' 
+                           END) = '$stock_level_filter'";
+}
+
+$inventory_result = $conn->query($inventory_sql);
+$inventory_data = [];
+$total_products = 0;
+$total_quantity = 0;
+$total_value = 0;
+$low_stock_products = 0;
+
+// Dữ liệu cho biểu đồ phân bổ theo danh mục và kho
+$category_data = [];
+$warehouse_data = [];
+
+if ($inventory_result && $inventory_result->num_rows > 0) {
+    while ($row = $inventory_result->fetch_assoc()) {
+        $inventory_data[] = $row;
+        $total_products++;
+        $total_quantity += $row['quantity'];
+        $total_value += $row['total_value'];
+        
+        if ($row['stock_level'] == 'Thấp') {
+            $low_stock_products++;
+        }
+        
+        // Thống kê theo danh mục
+        if (!isset($category_data[$row['category_name']])) {
+            $category_data[$row['category_name']] = 0;
+        }
+        $category_data[$row['category_name']] += $row['total_value'];
+        
+        // Thống kê theo kho
+        if (!isset($warehouse_data[$row['warehouse_name']])) {
+            $warehouse_data[$row['warehouse_name']] = 0;
+        }
+        $warehouse_data[$row['warehouse_name']] += $row['total_value'];
+    }
+}
+
+// Truy vấn thống kê nhập kho
+$import_sql = "SELECT DATE(io.created_at) as import_date, w.warehouse_name, s.supplier_name,
+               COUNT(DISTINCT io.import_id) as total_imports, 
+               SUM(iod.quantity) as total_quantity,
+               SUM(iod.quantity * iod.unit_price) as total_amount
+               FROM import_orders io
+               JOIN import_order_details iod ON io.import_id = iod.import_id
+               JOIN warehouses w ON io.warehouse_id = w.warehouse_id
+               JOIN suppliers s ON io.supplier_id = s.supplier_id
+               WHERE io.status = 'COMPLETED'";
+
+if (!empty($warehouse_filter)) {
+    $import_sql .= " AND io.warehouse_id = $warehouse_filter";
+}
+
+// Thiết lập điều kiện ngày
+if ($date_range === 'custom' && !empty($start_date) && !empty($end_date)) {
+    $import_sql .= " AND DATE(io.created_at) BETWEEN '$start_date' AND '$end_date'";
+} else {
+    $days = intval($date_range);
+    $import_sql .= " AND io.created_at >= DATE_SUB(CURDATE(), INTERVAL $days DAY)";
+}
+
+$import_sql .= " GROUP BY DATE(io.created_at), w.warehouse_id, s.supplier_id
+                 ORDER BY import_date DESC";
+
+$import_result = $conn->query($import_sql);
+$import_data = [];
+$total_imports = 0;
+$total_import_value = 0;
+
+if ($import_result && $import_result->num_rows > 0) {
+    while ($row = $import_result->fetch_assoc()) {
+        $import_data[] = $row;
+        $total_imports += $row['total_imports'];
+        $total_import_value += $row['total_amount'];
+    }
+}
+
+// Truy vấn thống kê xuất kho
+$export_sql = "SELECT DATE(eo.created_at) as export_date, w.warehouse_name,
+               COUNT(DISTINCT eo.export_id) as total_exports, 
+               SUM(eod.quantity) as total_quantity,
+               SUM(eod.quantity * eod.unit_price) as total_amount
+               FROM export_orders eo
+               JOIN export_order_details eod ON eo.export_id = eod.export_id
+               JOIN warehouses w ON eo.warehouse_id = w.warehouse_id
+               WHERE eo.status = 'COMPLETED'";
+
+if (!empty($warehouse_filter)) {
+    $export_sql .= " AND eo.warehouse_id = $warehouse_filter";
+}
+
+// Thiết lập điều kiện ngày
+if ($date_range === 'custom' && !empty($start_date) && !empty($end_date)) {
+    $export_sql .= " AND DATE(eo.created_at) BETWEEN '$start_date' AND '$end_date'";
+} else {
+    $days = intval($date_range);
+    $export_sql .= " AND eo.created_at >= DATE_SUB(CURDATE(), INTERVAL $days DAY)";
+}
+
+$export_sql .= " GROUP BY DATE(eo.created_at), w.warehouse_id
+                 ORDER BY export_date DESC";
+
+$export_result = $conn->query($export_sql);
+$export_data = [];
+$total_exports = 0;
+$total_export_value = 0;
+
+if ($export_result && $export_result->num_rows > 0) {
+    while ($row = $export_result->fetch_assoc()) {
+        $export_data[] = $row;
+        $total_exports += $row['total_exports'];
+        $total_export_value += $row['total_amount'];
+    }
+}
+
+// Truy vấn thống kê nhà cung cấp
+$supplier_sql = "SELECT s.supplier_name,
+                 COUNT(DISTINCT io.import_id) as total_imports,
+                 SUM(iod.quantity) as total_quantity,
+                 SUM(iod.quantity * iod.unit_price) as total_amount
+                 FROM import_orders io
+                 JOIN import_order_details iod ON io.import_id = iod.import_id
+                 JOIN suppliers s ON io.supplier_id = s.supplier_id
+                 WHERE io.status = 'COMPLETED'";
+
+if (!empty($warehouse_filter)) {
+    $supplier_sql .= " AND io.warehouse_id = $warehouse_filter";
+}
+
+// Thiết lập điều kiện ngày
+if ($date_range === 'custom' && !empty($start_date) && !empty($end_date)) {
+    $supplier_sql .= " AND DATE(io.created_at) BETWEEN '$start_date' AND '$end_date'";
+} else {
+    $days = intval($date_range);
+    $supplier_sql .= " AND io.created_at >= DATE_SUB(CURDATE(), INTERVAL $days DAY)";
+}
+
+$supplier_sql .= " GROUP BY s.supplier_id
+                   ORDER BY total_amount DESC";
+
+$supplier_result = $conn->query($supplier_sql);
+$supplier_data = [];
+$total_supplier_amount = 0;
+
+if ($supplier_result && $supplier_result->num_rows > 0) {
+    // Tính tổng giá trị nhập hàng từ tất cả nhà cung cấp
+    $total_query = "SELECT SUM(iod.quantity * iod.unit_price) as total FROM import_orders io JOIN import_order_details iod ON io.import_id = iod.import_id WHERE io.status = 'COMPLETED'";
+    $total_result = $conn->query($total_query);
+    $total_row = $total_result->fetch_assoc();
+    $total_supplier_amount = $total_row['total'];
+    
+    while ($row = $supplier_result->fetch_assoc()) {
+        $row['percentage'] = $total_supplier_amount > 0 ? round(($row['total_amount'] / $total_supplier_amount) * 100, 2) : 0;
+        $supplier_data[] = $row;
+    }
+}
+
+// Truy vấn phân tích kho
+$shelf_sql = "SELECT s.shelf_id, s.shelf_code, wz.zone_code, w.warehouse_name,
+              s.max_capacity,
+              SUM(IFNULL(pl.quantity * p.volume, 0)) as used_capacity,
+              (SUM(IFNULL(pl.quantity * p.volume, 0)) / s.max_capacity * 100) as utilization_percentage,
+              CASE 
+                 WHEN SUM(IFNULL(pl.quantity * p.volume, 0)) / s.max_capacity * 100 < 30 THEN 'Thấp' 
+                 WHEN SUM(IFNULL(pl.quantity * p.volume, 0)) / s.max_capacity * 100 < 70 THEN 'Trung bình' 
+                 ELSE 'Cao' 
+              END AS utilization_level
+              FROM shelves s
+              JOIN warehouse_zones wz ON s.zone_id = wz.zone_id
+              JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
+              LEFT JOIN product_locations pl ON s.shelf_id = pl.shelf_id
+              LEFT JOIN products p ON pl.product_id = p.product_id";
+
+if (!empty($warehouse_filter)) {
+    $shelf_sql .= " WHERE wz.warehouse_id = $warehouse_filter";
+}
+
+$shelf_sql .= " GROUP BY s.shelf_id";
+
+$shelf_result = $conn->query($shelf_sql);
+$shelf_data = [];
+$total_shelves = 0;
+$used_capacity = 0;
+$total_capacity = 0;
+$high_utilization_shelves = 0;
+$low_utilization_shelves = 0;
+
+if ($shelf_result && $shelf_result->num_rows > 0) {
+    while ($row = $shelf_result->fetch_assoc()) {
+        $shelf_data[] = $row;
+        $total_shelves++;
+        $used_capacity += floatval($row['used_capacity']);
+        $total_capacity += floatval($row['max_capacity']);
+        
+        if ($row['utilization_level'] == 'Cao') {
+            $high_utilization_shelves++;
+        } else if ($row['utilization_level'] == 'Thấp') {
+            $low_utilization_shelves++;
+        }
+    }
+}
+
+$utilization_percentage = $total_capacity > 0 ? round(($used_capacity / $total_capacity) * 100, 2) : 0;
+
+// Truy vấn sản phẩm gần hết hạn
+$expiry_sql = "SELECT p.product_code, p.product_name, w.warehouse_name, s.shelf_code,
+               pl.batch_number, pl.expiry_date, pl.quantity,
+               DATEDIFF(pl.expiry_date, CURDATE()) as days_until_expiry
+               FROM product_locations pl
+               JOIN products p ON pl.product_id = p.product_id
+               JOIN shelves s ON pl.shelf_id = s.shelf_id
+               JOIN warehouse_zones wz ON s.zone_id = wz.zone_id
+               JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
+               WHERE pl.expiry_date IS NOT NULL 
+               AND pl.expiry_date > CURDATE()
+               AND DATEDIFF(pl.expiry_date, CURDATE()) <= $days_threshold";
+
+if (!empty($warehouse_filter)) {
+    $expiry_sql .= " AND wz.warehouse_id = $warehouse_filter";
+}
+
+$expiry_sql .= " ORDER BY days_until_expiry ASC";
+
+$expiry_result = $conn->query($expiry_sql);
+$expiry_data = [];
+$total_expiring_products = 0;
+$urgent_30_days = 0;
+$urgent_7_days = 0;
+
+if ($expiry_result && $expiry_result->num_rows > 0) {
+    while ($row = $expiry_result->fetch_assoc()) {
+        $expiry_data[] = $row;
+        $total_expiring_products++;
+        
+        if (intval($row['days_until_expiry']) <= 30) {
+            $urgent_30_days++;
+        }
+        if (intval($row['days_until_expiry']) <= 7) {
+            $urgent_7_days++;
+        }
+    }
+}
+
+// Hàm định dạng tiền tệ
+function formatCurrency($value) {
+    return number_format($value, 0, ',', '.') . ' ₫';
+}
+
+// Hàm định dạng ngày
+function formatDate($dateString) {
+    $date = new DateTime($dateString);
+    return $date->format('d/m/Y');
+}
+
+// Tạo dữ liệu cho biểu đồ
+$category_labels = json_encode(array_keys($category_data));
+$category_values = json_encode(array_values($category_data));
+
+$warehouse_labels = json_encode(array_keys($warehouse_data));
+$warehouse_values = json_encode(array_values($warehouse_data));
+
+// Dữ liệu cho biểu đồ kệ
+$utilization_labels = json_encode(['Thấp', 'Trung bình', 'Cao']);
+$medium_shelves = $total_shelves - $high_utilization_shelves - $low_utilization_shelves;
+$utilization_values = json_encode([$low_utilization_shelves, $medium_shelves, $high_utilization_shelves]);
+
+// Dữ liệu cho biểu đồ hạn sử dụng
+$expiry_groups = [
+    '<= 7 ngày' => 0,
+    '8-15 ngày' => 0,
+    '16-30 ngày' => 0,
+    '31-60 ngày' => 0,
+    '61-90 ngày' => 0
+];
+
+foreach ($expiry_data as $item) {
+    $days = intval($item['days_until_expiry']);
+    $quantity = intval($item['quantity']);
+    
+    if ($days <= 7) {
+        $expiry_groups['<= 7 ngày'] += $quantity;
+    } else if ($days <= 15) {
+        $expiry_groups['8-15 ngày'] += $quantity;
+    } else if ($days <= 30) {
+        $expiry_groups['16-30 ngày'] += $quantity;
+    } else if ($days <= 60) {
+        $expiry_groups['31-60 ngày'] += $quantity;
+    } else if ($days <= 90) {
+        $expiry_groups['61-90 ngày'] += $quantity;
+    }
+}
+
+$expiry_labels = json_encode(array_keys($expiry_groups));
+$expiry_values = json_encode(array_values($expiry_groups));
+
+// Dữ liệu cho biểu đồ nhập/xuất theo thời gian
+$time_series_data = [];
+$now = new DateTime();
+$interval = new DateInterval('P1D');
+$period = new DatePeriod(
+    (new DateTime())->sub(new DateInterval('P' . $date_range . 'D')),
+    $interval,
+    $now
+);
+
+foreach ($period as $date) {
+    $date_str = $date->format('Y-m-d');
+    $time_series_data[$date_str] = [
+        'date' => $date_str,
+        'import_value' => 0,
+        'export_value' => 0
+    ];
+}
+
+foreach ($import_data as $item) {
+    if (isset($time_series_data[$item['import_date']])) {
+        $time_series_data[$item['import_date']]['import_value'] += $item['total_amount'];
+    }
+}
+
+foreach ($export_data as $item) {
+    if (isset($time_series_data[$item['export_date']])) {
+        $time_series_data[$item['export_date']]['export_value'] += $item['total_amount'];
+    }
+}
+
+$time_labels = [];
+$import_values = [];
+$export_values = [];
+
+foreach ($time_series_data as $data) {
+    $time_labels[] = formatDate($data['date']);
+    $import_values[] = $data['import_value'];
+    $export_values[] = $data['export_value'];
+}
+
+$time_labels_json = json_encode($time_labels);
+$import_values_json = json_encode($import_values);
+$export_values_json = json_encode($export_values);
+
+// Dữ liệu cho biểu đồ nhà cung cấp
+$top5_suppliers = array_slice($supplier_data, 0, 5);
+$supplier_labels = [];
+$supplier_values = [];
+$supplier_quantities = [];
+
+foreach ($top5_suppliers as $supplier) {
+    $supplier_labels[] = $supplier['supplier_name'];
+    $supplier_values[] = $supplier['total_amount'];
+    $supplier_quantities[] = $supplier['total_quantity'];
+}
+
+$supplier_labels_json = json_encode($supplier_labels);
+$supplier_values_json = json_encode($supplier_values);
+$supplier_quantities_json = json_encode($supplier_quantities);
+
+// Dữ liệu dự báo kho
+$forecast_months = ['Hiện tại', '1 tháng', '2 tháng', '3 tháng', '4 tháng', '5 tháng', '6 tháng'];
+$forecast_data = [$utilization_percentage];
+$current_util = floatval($utilization_percentage);
+
+for ($i = 1; $i < 7; $i++) {
+    $current_util = min($current_util * 1.05, 100); // Tăng 5% mỗi tháng, tối đa 100%
+    $forecast_data[] = round($current_util, 2);
+}
+
+$forecast_labels_json = json_encode($forecast_months);
+$forecast_data_json = json_encode($forecast_data);
 ?>
 
 <div class="function-container">
@@ -9,73 +416,81 @@ include_once 'config/connect.php';
     <!-- Tabs cho các loại báo cáo -->
     <ul class="nav nav-tabs mb-4" id="reportsTabs" role="tablist">
         <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory-tab-pane" type="button" role="tab" aria-controls="inventory-tab-pane" aria-selected="true">
+            <a class="nav-link <?= ($current_tab == 'inventory') ? 'active' : '' ?>" id="inventory-tab" href="?option=baocaothongke&tab=inventory" role="tab">
                 <i class="fas fa-boxes me-2"></i>Báo cáo tồn kho
-            </button>
+            </a>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="imports-exports-tab" data-bs-toggle="tab" data-bs-target="#imports-exports-tab-pane" type="button" role="tab" aria-controls="imports-exports-tab-pane" aria-selected="false">
+            <a class="nav-link <?= ($current_tab == 'io') ? 'active' : '' ?>" id="imports-exports-tab" href="?option=baocaothongke&tab=io" role="tab">
                 <i class="fas fa-exchange-alt me-2"></i>Thống kê nhập/xuất
-            </button>
+            </a>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="warehouse-analysis-tab" data-bs-toggle="tab" data-bs-target="#warehouse-analysis-tab-pane" type="button" role="tab" aria-controls="warehouse-analysis-tab-pane" aria-selected="false">
+            <a class="nav-link <?= ($current_tab == 'warehouse') ? 'active' : '' ?>" id="warehouse-analysis-tab" href="?option=baocaothongke&tab=warehouse" role="tab">
                 <i class="fas fa-warehouse me-2"></i>Phân tích kho
-            </button>
+            </a>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="expiry-tracking-tab" data-bs-toggle="tab" data-bs-target="#expiry-tracking-tab-pane" type="button" role="tab" aria-controls="expiry-tracking-tab-pane" aria-selected="false">
+            <a class="nav-link <?= ($current_tab == 'expiry') ? 'active' : '' ?>" id="expiry-tracking-tab" href="?option=baocaothongke&tab=expiry" role="tab">
                 <i class="fas fa-calendar-times me-2"></i>Theo dõi hạn sử dụng
-            </button>
+            </a>
         </li>
     </ul>
     
     <div class="tab-content" id="reportsTabsContent">
         <!-- Tab Báo cáo tồn kho -->
-        <div class="tab-pane fade show active" id="inventory-tab-pane" role="tabpanel" aria-labelledby="inventory-tab" tabindex="0">
+        <div class="tab-pane fade <?= ($current_tab == 'inventory') ? 'show active' : '' ?>" id="inventory-tab-pane" role="tabpanel" aria-labelledby="inventory-tab" tabindex="0">
             <!-- Bộ lọc báo cáo tồn kho -->
             <div class="row mb-4">
-                <div class="col-md-3">
-                    <select class="form-select" id="inventoryWarehouseFilter">
-                        <option value="">Tất cả kho</option>
-                        <?php
-                        $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
-                        $result = $conn->query($sql);
-                        if ($result->num_rows > 0) {
-                            while($row = $result->fetch_assoc()) {
-                                echo "<option value='" . $row["warehouse_id"] . "'>" . $row["warehouse_name"] . "</option>";
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <select class="form-select" id="inventoryCategoryFilter">
-                        <option value="">Tất cả danh mục</option>
-                        <?php
-                        $sql = "SELECT category_id, category_name FROM categories ORDER BY category_name";
-                        $result = $conn->query($sql);
-                        if ($result->num_rows > 0) {
-                            while($row = $result->fetch_assoc()) {
-                                echo "<option value='" . $row["category_id"] . "'>" . $row["category_name"] . "</option>";
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <select class="form-select" id="inventoryStockLevelFilter">
-                        <option value="">Tất cả mức tồn kho</option>
-                        <option value="Thấp">Thấp</option>
-                        <option value="Trung bình">Trung bình</option>
-                        <option value="Cao">Cao</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <button class="btn btn-primary w-100" id="generateInventoryReport">
-                        <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
-                    </button>
-                </div>
+                <form method="GET">
+                    <input type="hidden" name="option" value="baocaothongke">
+                    <input type="hidden" name="tab" value="inventory">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <select class="form-select" name="warehouse" id="inventoryWarehouseFilter">
+                                <option value="">Tất cả kho</option>
+                                <?php
+                                $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
+                                $result = $conn->query($sql);
+                                if ($result->num_rows > 0) {
+                                    while($row = $result->fetch_assoc()) {
+                                        $selected = ($warehouse_filter == $row["warehouse_id"]) ? "selected" : "";
+                                        echo "<option value='" . $row["warehouse_id"] . "' $selected>" . $row["warehouse_name"] . "</option>";
+                                    }
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="category" id="inventoryCategoryFilter">
+                                <option value="">Tất cả danh mục</option>
+                                <?php
+                                $sql = "SELECT category_id, category_name FROM categories ORDER BY category_name";
+                                $result = $conn->query($sql);
+                                if ($result->num_rows > 0) {
+                                    while($row = $result->fetch_assoc()) {
+                                        $selected = ($category_filter == $row["category_id"]) ? "selected" : "";
+                                        echo "<option value='" . $row["category_id"] . "' $selected>" . $row["category_name"] . "</option>";
+                                    }
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="stock_level" id="inventoryStockLevelFilter">
+                                <option value="">Tất cả mức tồn kho</option>
+                                <option value="Thấp" <?= ($stock_level_filter == 'Thấp') ? 'selected' : '' ?>>Thấp</option>
+                                <option value="Trung bình" <?= ($stock_level_filter == 'Trung bình') ? 'selected' : '' ?>>Trung bình</option>
+                                <option value="Cao" <?= ($stock_level_filter == 'Cao') ? 'selected' : '' ?>>Cao</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
+                            </button>
+                        </div>
+                    </div>
+                </form>
             </div>
             
             <!-- Thống kê tổng quan tồn kho -->
@@ -83,7 +498,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalProducts">0</h2>
+                            <h2><?= $total_products ?></h2>
                             <p class="mb-0">Tổng sản phẩm</p>
                         </div>
                     </div>
@@ -91,7 +506,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalQuantity">0</h2>
+                            <h2><?= $total_quantity ?></h2>
                             <p class="mb-0">Tổng số lượng</p>
                         </div>
                     </div>
@@ -99,7 +514,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalValue">0 ₫</h2>
+                            <h2><?= formatCurrency($total_value) ?></h2>
                             <p class="mb-0">Tổng giá trị</p>
                         </div>
                     </div>
@@ -107,7 +522,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="lowStockProducts">0</h2>
+                            <h2><?= $low_stock_products ?></h2>
                             <p class="mb-0">Sản phẩm tồn thấp</p>
                         </div>
                     </div>
@@ -143,17 +558,17 @@ include_once 'config/connect.php';
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Chi tiết tồn kho</h5>
                     <div>
-                        <button class="btn btn-sm btn-outline-success me-2" id="exportInventoryExcel">
+                        <a href="export/inventory_excel.php?warehouse=<?= $warehouse_filter ?>&category=<?= $category_filter ?>&stock_level=<?= $stock_level_filter ?>" target="_blank" class="btn btn-sm btn-outline-success me-2">
                             <i class="fas fa-file-excel me-1"></i>Xuất Excel
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" id="exportInventoryPDF">
+                        </a>
+                        <a href="export/inventory_pdf.php?warehouse=<?= $warehouse_filter ?>&category=<?= $category_filter ?>&stock_level=<?= $stock_level_filter ?>" target="_blank" class="btn btn-sm btn-outline-danger">
                             <i class="fas fa-file-pdf me-1"></i>Xuất PDF
-                        </button>
+                        </a>
                     </div>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-bordered table-hover" id="inventoryTable">
+                        <table class="table table-bordered table-hover">
                             <thead>
                                 <tr>
                                     <th>Mã SP</th>
@@ -166,8 +581,29 @@ include_once 'config/connect.php';
                                     <th>Mức tồn kho</th>
                                 </tr>
                             </thead>
-                            <tbody id="inventoryTableBody">
-                                <!-- Dữ liệu sẽ được load bằng AJAX -->
+                            <tbody>
+                                <?php if (count($inventory_data) > 0): ?>
+                                    <?php foreach ($inventory_data as $item): ?>
+                                        <tr>
+                                            <td><?= $item['product_code'] ?></td>
+                                            <td><?= $item['product_name'] ?></td>
+                                            <td><?= $item['category_name'] ?></td>
+                                            <td><?= $item['warehouse_name'] ?></td>
+                                            <td><?= $item['quantity'] ?></td>
+                                            <td><?= formatCurrency($item['price']) ?></td>
+                                            <td><?= formatCurrency($item['total_value']) ?></td>
+                                            <td>
+                                                <span class="<?= $item['stock_level'] == 'Thấp' ? 'text-danger' : ($item['stock_level'] == 'Trung bình' ? 'text-warning' : 'text-success') ?>">
+                                                    <?= $item['stock_level'] ?>
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="8" class="text-center">Không có dữ liệu</td>
+                                    </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -176,44 +612,51 @@ include_once 'config/connect.php';
         </div>
         
         <!-- Tab Thống kê nhập/xuất -->
-        <div class="tab-pane fade" id="imports-exports-tab-pane" role="tabpanel" aria-labelledby="imports-exports-tab" tabindex="0">
+        <div class="tab-pane fade <?= ($current_tab == 'io') ? 'show active' : '' ?>" id="imports-exports-tab-pane" role="tabpanel" aria-labelledby="imports-exports-tab" tabindex="0">
             <!-- Bộ lọc thống kê nhập/xuất -->
             <div class="row mb-4">
-                <div class="col-md-3">
-                    <select class="form-select" id="ioWarehouseFilter">
-                        <option value="">Tất cả kho</option>
-                        <?php
-                        $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
-                        $result = $conn->query($sql);
-                        if ($result->num_rows > 0) {
-                            while($row = $result->fetch_assoc()) {
-                                echo "<option value='" . $row["warehouse_id"] . "'>" . $row["warehouse_name"] . "</option>";
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <select class="form-select" id="ioDateRangeFilter">
-                        <option value="7">7 ngày qua</option>
-                        <option value="30">30 ngày qua</option>
-                        <option value="90">90 ngày qua</option>
-                        <option value="365">1 năm qua</option>
-                        <option value="custom">Tùy chỉnh</option>
-                    </select>
-                </div>
-                <div class="col-md-3 date-range-container" style="display: none;">
-                    <div class="input-group">
-                        <input type="date" class="form-control" id="ioStartDate">
-                        <span class="input-group-text">đến</span>
-                        <input type="date" class="form-control" id="ioEndDate">
+                <form method="GET">
+                    <input type="hidden" name="option" value="baocaothongke">
+                    <input type="hidden" name="tab" value="io">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <select class="form-select" name="warehouse" id="ioWarehouseFilter">
+                                <option value="">Tất cả kho</option>
+                                <?php
+                                $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
+                                $result = $conn->query($sql);
+                                if ($result->num_rows > 0) {
+                                    while($row = $result->fetch_assoc()) {
+                                        $selected = ($warehouse_filter == $row["warehouse_id"]) ? "selected" : "";
+                                        echo "<option value='" . $row["warehouse_id"] . "' $selected>" . $row["warehouse_name"] . "</option>";
+                                    }
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="date_range" id="ioDateRangeFilter">
+                                <option value="7" <?= ($date_range == '7') ? 'selected' : '' ?>>7 ngày qua</option>
+                                <option value="30" <?= ($date_range == '30') ? 'selected' : '' ?>>30 ngày qua</option>
+                                <option value="90" <?= ($date_range == '90') ? 'selected' : '' ?>>90 ngày qua</option>
+                                <option value="365" <?= ($date_range == '365') ? 'selected' : '' ?>>1 năm qua</option>
+                                <option value="custom" <?= ($date_range == 'custom') ? 'selected' : '' ?>>Tùy chỉnh</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 <?= ($date_range == 'custom') ? '' : 'd-none' ?>" id="date-range-container">
+                            <div class="input-group">
+                                <input type="date" class="form-control" name="start_date" id="ioStartDate" value="<?= $start_date ?>">
+                                <span class="input-group-text">đến</span>
+                                <input type="date" class="form-control" name="end_date" id="ioEndDate" value="<?= $end_date ?>">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-3">
-                    <button class="btn btn-primary w-100" id="generateIOReport">
-                        <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
-                    </button>
-                </div>
+                </form>
             </div>
             
             <!-- Thống kê tổng quan nhập/xuất -->
@@ -221,7 +664,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalImports">0</h2>
+                            <h2><?= $total_imports ?></h2>
                             <p class="mb-0">Tổng phiếu nhập</p>
                         </div>
                     </div>
@@ -229,7 +672,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalImportValue">0 ₫</h2>
+                            <h2><?= formatCurrency($total_import_value) ?></h2>
                             <p class="mb-0">Tổng giá trị nhập</p>
                         </div>
                     </div>
@@ -237,7 +680,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalExports">0</h2>
+                            <h2><?= $total_exports ?></h2>
                             <p class="mb-0">Tổng phiếu xuất</p>
                         </div>
                     </div>
@@ -245,7 +688,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalExportValue">0 ₫</h2>
+                            <h2><?= formatCurrency($total_export_value) ?></h2>
                             <p class="mb-0">Tổng giá trị xuất</p>
                         </div>
                     </div>
@@ -271,7 +714,7 @@ include_once 'config/connect.php';
                     <button class="nav-link" id="exports-tab" data-bs-toggle="tab" data-bs-target="#exports-tab-pane" type="button" role="tab" aria-controls="exports-tab-pane" aria-selected="false">Chi tiết xuất kho</button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="suppliers-analysis-tab" data-bs-toggle="tab" data-bs-target="#suppliers-analysis-tab-pane" type="button" role="tab" aria-controls="suppliers-analysis-tab-pane" aria-selected="false">Phân tích nhà cung cấp</button>
+                <button class="nav-link" id="suppliers-analysis-tab" data-bs-toggle="tab" data-bs-target="#suppliers-analysis-tab-pane" type="button" role="tab" aria-controls="suppliers-analysis-tab-pane" aria-selected="false">Phân tích nhà cung cấp</button>
                 </li>
             </ul>
             
@@ -282,14 +725,14 @@ include_once 'config/connect.php';
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="card-title mb-0">Chi tiết nhập kho</h5>
                             <div>
-                                <button class="btn btn-sm btn-outline-success me-2" id="exportImportsExcel">
+                                <a href="export/imports_excel.php?warehouse=<?= $warehouse_filter ?>&date_range=<?= $date_range ?>&start_date=<?= $start_date ?>&end_date=<?= $end_date ?>" target="_blank" class="btn btn-sm btn-outline-success me-2">
                                     <i class="fas fa-file-excel me-1"></i>Xuất Excel
-                                </button>
+                                </a>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-bordered table-hover" id="importsTable">
+                                <table class="table table-bordered table-hover">
                                     <thead>
                                         <tr>
                                             <th>Ngày nhập</th>
@@ -300,8 +743,23 @@ include_once 'config/connect.php';
                                             <th>Tổng giá trị</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="importsTableBody">
-                                        <!-- Dữ liệu sẽ được load bằng AJAX -->
+                                    <tbody>
+                                        <?php if (count($import_data) > 0): ?>
+                                            <?php foreach ($import_data as $item): ?>
+                                                <tr>
+                                                    <td><?= formatDate($item['import_date']) ?></td>
+                                                    <td><?= $item['warehouse_name'] ?></td>
+                                                    <td><?= $item['supplier_name'] ?></td>
+                                                    <td><?= $item['total_imports'] ?></td>
+                                                    <td><?= $item['total_quantity'] ?></td>
+                                                    <td><?= formatCurrency($item['total_amount']) ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="6" class="text-center">Không có dữ liệu</td>
+                                            </tr>
+                                        <?php endif; ?>
                                     </tbody>
                                 </table>
                             </div>
@@ -315,14 +773,14 @@ include_once 'config/connect.php';
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="card-title mb-0">Chi tiết xuất kho</h5>
                             <div>
-                                <button class="btn btn-sm btn-outline-success me-2" id="exportExportsExcel">
+                                <a href="export/exports_excel.php?warehouse=<?= $warehouse_filter ?>&date_range=<?= $date_range ?>&start_date=<?= $start_date ?>&end_date=<?= $end_date ?>" target="_blank" class="btn btn-sm btn-outline-success me-2">
                                     <i class="fas fa-file-excel me-1"></i>Xuất Excel
-                                </button>
+                                </a>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-bordered table-hover" id="exportsTable">
+                                <table class="table table-bordered table-hover">
                                     <thead>
                                         <tr>
                                             <th>Ngày xuất</th>
@@ -332,8 +790,22 @@ include_once 'config/connect.php';
                                             <th>Tổng giá trị</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="exportsTableBody">
-                                        <!-- Dữ liệu sẽ được load bằng AJAX -->
+                                    <tbody>
+                                        <?php if (count($export_data) > 0): ?>
+                                            <?php foreach ($export_data as $item): ?>
+                                                <tr>
+                                                    <td><?= formatDate($item['export_date']) ?></td>
+                                                    <td><?= $item['warehouse_name'] ?></td>
+                                                    <td><?= $item['total_exports'] ?></td>
+                                                    <td><?= $item['total_quantity'] ?></td>
+                                                    <td><?= formatCurrency($item['total_amount']) ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center">Không có dữ liệu</td>
+                                            </tr>
+                                        <?php endif; ?>
                                     </tbody>
                                 </table>
                             </div>
@@ -371,7 +843,7 @@ include_once 'config/connect.php';
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-bordered table-hover" id="suppliersTable">
+                                <table class="table table-bordered table-hover">
                                     <thead>
                                         <tr>
                                             <th>Nhà cung cấp</th>
@@ -381,8 +853,22 @@ include_once 'config/connect.php';
                                             <th>% Tỷ trọng</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="suppliersTableBody">
-                                        <!-- Dữ liệu sẽ được load bằng AJAX -->
+                                    <tbody>
+                                        <?php if (count($supplier_data) > 0): ?>
+                                            <?php foreach ($supplier_data as $item): ?>
+                                                <tr>
+                                                    <td><?= $item['supplier_name'] ?></td>
+                                                    <td><?= $item['total_imports'] ?></td>
+                                                    <td><?= $item['total_quantity'] ?></td>
+                                                    <td><?= formatCurrency($item['total_amount']) ?></td>
+                                                    <td><?= $item['percentage'] ?>%</td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center">Không có dữ liệu</td>
+                                            </tr>
+                                        <?php endif; ?>
                                     </tbody>
                                 </table>
                             </div>
@@ -393,28 +879,35 @@ include_once 'config/connect.php';
         </div>
         
         <!-- Tab Phân tích kho -->
-        <div class="tab-pane fade" id="warehouse-analysis-tab-pane" role="tabpanel" aria-labelledby="warehouse-analysis-tab" tabindex="0">
+        <div class="tab-pane fade <?= ($current_tab == 'warehouse') ? 'show active' : '' ?>" id="warehouse-analysis-tab-pane" role="tabpanel" aria-labelledby="warehouse-analysis-tab" tabindex="0">
             <!-- Bộ lọc phân tích kho -->
             <div class="row mb-4">
-                <div class="col-md-6">
-                    <select class="form-select" id="warehouseFilter">
-                        <option value="">Tất cả kho</option>
-                        <?php
-                        $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
-                        $result = $conn->query($sql);
-                        if ($result->num_rows > 0) {
-                            while($row = $result->fetch_assoc()) {
-                                echo "<option value='" . $row["warehouse_id"] . "'>" . $row["warehouse_name"] . "</option>";
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                <div class="col-md-6">
-                    <button class="btn btn-primary w-100" id="generateWarehouseReport">
-                        <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
-                    </button>
-                </div>
+                <form method="GET">
+                    <input type="hidden" name="option" value="baocaothongke">
+                    <input type="hidden" name="tab" value="warehouse">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <select class="form-select" name="warehouse" id="warehouseFilter">
+                                <option value="">Tất cả kho</option>
+                                <?php
+                                $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
+                                $result = $conn->query($sql);
+                                if ($result->num_rows > 0) {
+                                    while($row = $result->fetch_assoc()) {
+                                        $selected = ($warehouse_filter == $row["warehouse_id"]) ? "selected" : "";
+                                        echo "<option value='" . $row["warehouse_id"] . "' $selected>" . $row["warehouse_name"] . "</option>";
+                                    }
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
+                            </button>
+                        </div>
+                    </div>
+                </form>
             </div>
             
             <!-- Thống kê tổng quan kho -->
@@ -422,7 +915,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalShelves">0</h2>
+                            <h2><?= $total_shelves ?></h2>
                             <p class="mb-0">Tổng số kệ</p>
                         </div>
                     </div>
@@ -430,7 +923,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="usedCapacity">0%</h2>
+                            <h2><?= $utilization_percentage ?>%</h2>
                             <p class="mb-0">Công suất sử dụng</p>
                         </div>
                     </div>
@@ -438,7 +931,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="highUtilizationShelves">0</h2>
+                            <h2><?= $high_utilization_shelves ?></h2>
                             <p class="mb-0">Kệ sử dụng cao</p>
                         </div>
                     </div>
@@ -446,7 +939,7 @@ include_once 'config/connect.php';
                 <div class="col-md-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="lowUtilizationShelves">0</h2>
+                            <h2><?= $low_utilization_shelves ?></h2>
                             <p class="mb-0">Kệ sử dụng thấp</p>
                         </div>
                     </div>
@@ -482,14 +975,14 @@ include_once 'config/connect.php';
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Chi tiết sử dụng kệ</h5>
                     <div>
-                        <button class="btn btn-sm btn-outline-success me-2" id="exportShelvesExcel">
+                        <a href="export/shelves_excel.php?warehouse=<?= $warehouse_filter ?>" target="_blank" class="btn btn-sm btn-outline-success me-2">
                             <i class="fas fa-file-excel me-1"></i>Xuất Excel
-                        </button>
+                        </a>
                     </div>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-bordered table-hover" id="shelvesTable">
+                        <table class="table table-bordered table-hover">
                             <thead>
                                 <tr>
                                     <th>Mã kệ</th>
@@ -501,8 +994,34 @@ include_once 'config/connect.php';
                                     <th>Mức độ sử dụng</th>
                                 </tr>
                             </thead>
-                            <tbody id="shelvesTableBody">
-                                <!-- Dữ liệu sẽ được load bằng AJAX -->
+                            <tbody>
+                                <?php if (count($shelf_data) > 0): ?>
+                                    <?php foreach ($shelf_data as $item): ?>
+                                        <?php 
+                                            $utilization_class = '';
+                                            if ($item['utilization_level'] == 'Thấp') {
+                                                $utilization_class = 'text-success';
+                                            } else if ($item['utilization_level'] == 'Trung bình') {
+                                                $utilization_class = 'text-warning';
+                                            } else {
+                                                $utilization_class = 'text-danger';
+                                            }
+                                        ?>
+                                        <tr>
+                                            <td><?= $item['shelf_code'] ?></td>
+                                            <td><?= $item['zone_code'] ?></td>
+                                            <td><?= $item['warehouse_name'] ?></td>
+                                            <td><?= number_format($item['max_capacity'], 2) ?></td>
+                                            <td><?= number_format($item['used_capacity'], 2) ?></td>
+                                            <td><?= number_format($item['utilization_percentage'], 2) ?>%</td>
+                                            <td class="<?= $utilization_class ?>"><?= $item['utilization_level'] ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="7" class="text-center">Không có dữ liệu</td>
+                                    </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -511,36 +1030,43 @@ include_once 'config/connect.php';
         </div>
         
         <!-- Tab Theo dõi hạn sử dụng -->
-        <div class="tab-pane fade" id="expiry-tracking-tab-pane" role="tabpanel" aria-labelledby="expiry-tracking-tab" tabindex="0">
+        <div class="tab-pane fade <?= ($current_tab == 'expiry') ? 'show active' : '' ?>" id="expiry-tracking-tab-pane" role="tabpanel" aria-labelledby="expiry-tracking-tab" tabindex="0">
             <!-- Bộ lọc theo dõi hạn sử dụng -->
             <div class="row mb-4">
-                <div class="col-md-4">
-                    <select class="form-select" id="expiryWarehouseFilter">
-                        <option value="">Tất cả kho</option>
-                        <?php
-                        $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
-                        $result = $conn->query($sql);
-                        if ($result->num_rows > 0) {
-                            while($row = $result->fetch_assoc()) {
-                                echo "<option value='" . $row["warehouse_id"] . "'>" . $row["warehouse_name"] . "</option>";
-                            }
-                        }
-                        ?>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <select class="form-select" id="expiryDaysFilter">
-                        <option value="30">30 ngày tới</option>
-                        <option value="60">60 ngày tới</option>
-                        <option value="90">90 ngày tới</option>
-                        <option value="180">180 ngày tới</option>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <button class="btn btn-primary w-100" id="generateExpiryReport">
-                        <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
-                    </button>
-                </div>
+                <form method="GET">
+                    <input type="hidden" name="option" value="baocaothongke">
+                    <input type="hidden" name="tab" value="expiry">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <select class="form-select" name="warehouse" id="expiryWarehouseFilter">
+                                <option value="">Tất cả kho</option>
+                                <?php
+                                $sql = "SELECT warehouse_id, warehouse_name FROM warehouses ORDER BY warehouse_name";
+                                $result = $conn->query($sql);
+                                if ($result->num_rows > 0) {
+                                    while($row = $result->fetch_assoc()) {
+                                        $selected = ($warehouse_filter == $row["warehouse_id"]) ? "selected" : "";
+                                        echo "<option value='" . $row["warehouse_id"] . "' $selected>" . $row["warehouse_name"] . "</option>";
+                                    }
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <select class="form-select" name="days_threshold" id="expiryDaysFilter">
+                                <option value="30" <?= ($days_threshold == '30') ? 'selected' : '' ?>>30 ngày tới</option>
+                                <option value="60" <?= ($days_threshold == '60') ? 'selected' : '' ?>>60 ngày tới</option>
+                                <option value="90" <?= ($days_threshold == '90') ? 'selected' : '' ?>>90 ngày tới</option>
+                                <option value="180" <?= ($days_threshold == '180') ? 'selected' : '' ?>>180 ngày tới</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-sync-alt me-2"></i>Tạo báo cáo
+                            </button>
+                        </div>
+                    </div>
+                </form>
             </div>
             
             <!-- Thống kê tổng quan hạn sử dụng -->
@@ -548,7 +1074,7 @@ include_once 'config/connect.php';
                 <div class="col-md-4">
                     <div class="card">
                         <div class="card-body text-center">
-                            <h2 id="totalExpiringProducts">0</h2>
+                            <h2><?= $total_expiring_products ?></h2>
                             <p class="mb-0">Tổng SP gần hết hạn</p>
                         </div>
                     </div>
@@ -556,7 +1082,7 @@ include_once 'config/connect.php';
                 <div class="col-md-4">
                     <div class="card bg-warning text-white">
                         <div class="card-body text-center">
-                            <h2 id="urgent30DaysProducts">0</h2>
+                            <h2><?= $urgent_30_days ?></h2>
                             <p class="mb-0">Sắp hết hạn (dưới 30 ngày)</p>
                         </div>
                     </div>
@@ -564,7 +1090,7 @@ include_once 'config/connect.php';
                 <div class="col-md-4">
                     <div class="card bg-danger text-white">
                         <div class="card-body text-center">
-                            <h2 id="urgent7DaysProducts">0</h2>
+                            <h2><?= $urgent_7_days ?></h2>
                             <p class="mb-0">Sắp hết hạn (dưới 7 ngày)</p>
                         </div>
                     </div>
@@ -586,17 +1112,17 @@ include_once 'config/connect.php';
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Chi tiết sản phẩm gần hết hạn</h5>
                     <div>
-                        <button class="btn btn-sm btn-outline-success me-2" id="exportExpiryExcel">
+                        <a href="export/expiry_excel.php?warehouse=<?= $warehouse_filter ?>&days_threshold=<?= $days_threshold ?>" target="_blank" class="btn btn-sm btn-outline-success me-2">
                             <i class="fas fa-file-excel me-1"></i>Xuất Excel
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger" id="exportExpiryPDF">
+                        </a>
+                        <a href="export/expiry_pdf.php?warehouse=<?= $warehouse_filter ?>&days_threshold=<?= $days_threshold ?>" target="_blank" class="btn btn-sm btn-outline-danger">
                             <i class="fas fa-file-pdf me-1"></i>Xuất PDF
-                        </button>
+                        </a>
                     </div>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-bordered table-hover" id="expiryTable">
+                        <table class="table table-bordered table-hover">
                             <thead>
                                 <tr>
                                     <th>Mã SP</th>
@@ -609,8 +1135,37 @@ include_once 'config/connect.php';
                                     <th>Số lượng</th>
                                 </tr>
                             </thead>
-                            <tbody id="expiryTableBody">
-                                <!-- Dữ liệu sẽ được load bằng AJAX -->
+                            <tbody>
+                                <?php if (count($expiry_data) > 0): ?>
+                                    <?php foreach ($expiry_data as $item): ?>
+                                        <?php 
+                                            $days_class = '';
+                                            $days_remaining = intval($item['days_until_expiry']);
+                                            
+                                            if ($days_remaining <= 7) {
+                                                $days_class = 'text-danger fw-bold';
+                                            } else if ($days_remaining <= 30) {
+                                                $days_class = 'text-warning fw-bold';
+                                            } else {
+                                                $days_class = 'text-info';
+                                            }
+                                        ?>
+                                        <tr>
+                                            <td><?= $item['product_code'] ?></td>
+                                            <td><?= $item['product_name'] ?></td>
+                                            <td><?= $item['warehouse_name'] ?></td>
+                                            <td><?= $item['shelf_code'] ?></td>
+                                            <td><?= $item['batch_number'] ?: 'N/A' ?></td>
+                                            <td><?= formatDate($item['expiry_date']) ?></td>
+                                            <td class="<?= $days_class ?>"><?= $days_remaining ?></td>
+                                            <td><?= $item['quantity'] ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="8" class="text-center">Không có sản phẩm gần hết hạn trong khoảng thời gian đã chọn</td>
+                                    </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -621,838 +1176,303 @@ include_once 'config/connect.php';
 </div>
 
 <script>
+// Xử lý hiển thị/ẩn date range khi thay đổi lựa chọn
 document.addEventListener('DOMContentLoaded', function() {
-    // Khởi tạo thư viện Chart.js
-    let inventoryCategoryChart = null;
-    let inventoryWarehouseChart = null;
-    let ioTimeChart = null;
-    let supplierValueChart = null;
-    let supplierQuantityChart = null;
-    let shelfUtilizationChart = null;
-    let warehouseCapacityForecastChart = null;
-    let expiryDistributionChart = null;
-    
-    // Báo cáo tồn kho
-    document.getElementById('generateInventoryReport').addEventListener('click', function() {
-        generateInventoryReport();
-    });
+    // Khởi tạo các biểu đồ khi tài liệu đã tải xong
     
     // Hiển thị input tùy chỉnh ngày khi chọn tùy chỉnh
-    document.getElementById('ioDateRangeFilter').addEventListener('change', function() {
-        if (this.value === 'custom') {
-            document.querySelector('.date-range-container').style.display = 'block';
-        } else {
-            document.querySelector('.date-range-container').style.display = 'none';
-        }
-    });
-    
-    // Thống kê nhập/xuất
-    document.getElementById('generateIOReport').addEventListener('click', function() {
-        generateIOReport();
-    });
-    
-    // Phân tích kho
-    document.getElementById('generateWarehouseReport').addEventListener('click', function() {
-        generateWarehouseAnalysis();
-    });
-    
-    // Theo dõi hạn sử dụng
-    document.getElementById('generateExpiryReport').addEventListener('click', function() {
-        generateExpiryReport();
-    });
-    
-    // Xuất Excel báo cáo tồn kho
-    document.getElementById('exportInventoryExcel').addEventListener('click', function() {
-        exportToExcel('inventory');
-    });
-    
-    // Xuất PDF báo cáo tồn kho
-    document.getElementById('exportInventoryPDF').addEventListener('click', function() {
-        exportToPDF('inventory');
-    });
-    
-    // Xuất Excel báo cáo nhập kho
-    document.getElementById('exportImportsExcel').addEventListener('click', function() {
-        exportToExcel('imports');
-    });
-    
-    // Xuất Excel báo cáo xuất kho
-    document.getElementById('exportExportsExcel').addEventListener('click', function() {
-        exportToExcel('exports');
-    });
-    
-    // Xuất Excel báo cáo kệ
-    document.getElementById('exportShelvesExcel').addEventListener('click', function() {
-        exportToExcel('shelves');
-    });
-    
-    // Xuất Excel báo cáo hạn sử dụng
-    document.getElementById('exportExpiryExcel').addEventListener('click', function() {
-        exportToExcel('expiry');
-    });
-    
-    // Xuất PDF báo cáo hạn sử dụng
-    document.getElementById('exportExpiryPDF').addEventListener('click', function() {
-        exportToPDF('expiry');
-    });
-    
-    // Tải báo cáo tồn kho mặc định khi trang được tải
-    generateInventoryReport();
-    
-    // Hàm tạo báo cáo tồn kho
-    function generateInventoryReport() {
-        const warehouseId = document.getElementById('inventoryWarehouseFilter').value;
-        const categoryId = document.getElementById('inventoryCategoryFilter').value;
-        const stockLevel = document.getElementById('inventoryStockLevelFilter').value;
-        
-        // Hiển thị loading
-        document.getElementById('inventoryTableBody').innerHTML = '<tr><td colspan="8" class="text-center">Đang tải dữ liệu...</td></tr>';
-        
-        // Gọi API để lấy dữ liệu
-        fetch(`ajax/inventory_report.php?warehouseId=${warehouseId}&categoryId=${categoryId}&stockLevel=${stockLevel}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Cập nhật thống kê tổng quan
-                    document.getElementById('totalProducts').textContent = data.stats.totalProducts;
-                    document.getElementById('totalQuantity').textContent = data.stats.totalQuantity;
-                    document.getElementById('totalValue').textContent = formatCurrency(data.stats.totalValue);
-                    document.getElementById('lowStockProducts').textContent = data.stats.lowStockProducts;
-                    
-                    // Hiển thị dữ liệu trong bảng
-                    let tableHtml = '';
-                    data.inventory.forEach(item => {
-                        let stockLevelClass = '';
-                        if (item.stock_level === 'Thấp') {
-                            stockLevelClass = 'text-danger';
-                        } else if (item.stock_level === 'Trung bình') {
-                            stockLevelClass = 'text-warning';
-                        } else {
-                            stockLevelClass = 'text-success';
-                        }
-                        
-                        tableHtml += `
-                            <tr>
-                                <td>${item.product_code}</td>
-                                <td>${item.product_name}</td>
-                                <td>${item.category_name}</td>
-                                <td>${item.warehouse_name}</td>
-                                <td>${item.quantity}</td>
-                                <td>${formatCurrency(item.price)}</td>
-                                <td>${formatCurrency(item.total_value)}</td>
-                                <td><span class="${stockLevelClass}">${item.stock_level}</span></td>
-                            </tr>
-                        `;
-                    });
-                    
-                    if (tableHtml === '') {
-                        tableHtml = '<tr><td colspan="8" class="text-center">Không có dữ liệu</td></tr>';
-                    }
-                    document.getElementById('inventoryTableBody').innerHTML = tableHtml;
-                    
-                    // Vẽ biểu đồ phân bổ theo danh mục
-                    if (inventoryCategoryChart) {
-                        inventoryCategoryChart.destroy();
-                    }
-                    
-                    const categoryLabels = [];
-                    const categoryValues = [];
-                    const categoryColors = [];
-                    
-                    // Tạo dữ liệu nhóm theo danh mục
-                    const categoryData = {};
-                    data.inventory.forEach(item => {
-                        if (!categoryData[item.category_name]) {
-                            categoryData[item.category_name] = 0;
-                        }
-                        categoryData[item.category_name] += parseFloat(item.total_value);
-                    });
-                    
-                    // Tạo mảng dữ liệu cho biểu đồ
-                    for (const category in categoryData) {
-                        categoryLabels.push(category);
-                        categoryValues.push(categoryData[category]);
-                        categoryColors.push(getRandomColor());
-                    }
-                    
-                    // Vẽ biểu đồ phân bổ theo danh mục
-                    const ctxCategory = document.getElementById('inventoryCategoryChart').getContext('2d');
-                    inventoryCategoryChart = new Chart(ctxCategory, {
-                        type: 'pie',
-                        data: {
-                            labels: categoryLabels,
-                            datasets: [{
-                                data: categoryValues,
-                                backgroundColor: categoryColors
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                legend: {
-                                    position: 'right'
-                                },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            const value = context.raw;
-                                            const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
-                                            const percentage = ((value / total) * 100).toFixed(2);
-                                            return `${context.label}: ${formatCurrency(value)} (${percentage}%)`;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    
-                    // Vẽ biểu đồ phân bổ theo kho
-                    if (inventoryWarehouseChart) {
-                        inventoryWarehouseChart.destroy();
-                    }
-                    
-                    const warehouseLabels = [];
-                    const warehouseValues = [];
-                    const warehouseColors = [];
-                    
-                    // Tạo dữ liệu nhóm theo kho
-                    const warehouseData = {};
-                    data.inventory.forEach(item => {
-                        if (!warehouseData[item.warehouse_name]) {
-                            warehouseData[item.warehouse_name] = 0;
-                        }
-                        warehouseData[item.warehouse_name] += parseFloat(item.total_value);
-                    });
-                    
-                    // Tạo mảng dữ liệu cho biểu đồ
-                    for (const warehouse in warehouseData) {
-                        warehouseLabels.push(warehouse);
-                        warehouseValues.push(warehouseData[warehouse]);
-                        warehouseColors.push(getRandomColor());
-                    }
-                    
-                    // Vẽ biểu đồ phân bổ theo kho
-                    const ctxWarehouse = document.getElementById('inventoryWarehouseChart').getContext('2d');
-                    inventoryWarehouseChart = new Chart(ctxWarehouse, {
-                        type: 'doughnut',
-                        data: {
-                            labels: warehouseLabels,
-                            datasets: [{
-                                data: warehouseValues,
-                                backgroundColor: warehouseColors
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                legend: {
-                                    position: 'right'
-                                },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            const value = context.raw;
-                                            const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
-                                            const percentage = ((value / total) * 100).toFixed(2);
-                                            return `${context.label}: ${formatCurrency(value)} (${percentage}%)`;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                } else {
-                    document.getElementById('inventoryTableBody').innerHTML = '<tr><td colspan="8" class="text-center">Không có dữ liệu</td></tr>';
-                }
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải báo cáo tồn kho:', error);
-                document.getElementById('inventoryTableBody').innerHTML = '<tr><td colspan="8" class="text-center text-danger">Đã xảy ra lỗi khi tải dữ liệu</td></tr>';
-            });
-    }
-    
-    // Hàm tạo báo cáo nhập/xuất
-    function generateIOReport() {
-        const warehouseId = document.getElementById('ioWarehouseFilter').value;
-        const dateRange = document.getElementById('ioDateRangeFilter').value;
-        let startDate = '';
-        let endDate = '';
-        
-        if (dateRange === 'custom') {
-            startDate = document.getElementById('ioStartDate').value;
-            endDate = document.getElementById('ioEndDate').value;
-            
-            if (!startDate || !endDate) {
-                alert('Vui lòng chọn ngày bắt đầu và ngày kết thúc');
-                return;
+    const dateRangeFilter = document.getElementById('ioDateRangeFilter');
+    if (dateRangeFilter) {
+        dateRangeFilter.addEventListener('change', function() {
+            const container = document.getElementById('date-range-container');
+            if (this.value === 'custom') {
+                container.classList.remove('d-none');
+            } else {
+                container.classList.add('d-none');
             }
-        }
-        
-        // Hiển thị loading
-        document.getElementById('importsTableBody').innerHTML = '<tr><td colspan="6" class="text-center">Đang tải dữ liệu...</td></tr>';
-        document.getElementById('exportsTableBody').innerHTML = '<tr><td colspan="5" class="text-center">Đang tải dữ liệu...</td></tr>';
-        
-        // Gọi API để lấy dữ liệu
-        fetch(`ajax/io_report.php?warehouseId=${warehouseId}&dateRange=${dateRange}&startDate=${startDate}&endDate=${endDate}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Cập nhật thống kê tổng quan
-                    document.getElementById('totalImports').textContent = data.stats.totalImports;
-                    document.getElementById('totalImportValue').textContent = formatCurrency(data.stats.totalImportValue);
-                    document.getElementById('totalExports').textContent = data.stats.totalExports;
-                    document.getElementById('totalExportValue').textContent = formatCurrency(data.stats.totalExportValue);
-                    
-                    // Hiển thị dữ liệu nhập kho
-                    let importsTableHtml = '';
-                    data.imports.forEach(item => {
-                        importsTableHtml += `
-                            <tr>
-                                <td>${formatDate(item.import_date)}</td>
-                                <td>${item.warehouse_name}</td>
-                                <td>${item.supplier_name}</td>
-                                <td>${item.total_imports}</td>
-                                <td>${item.total_quantity}</td>
-                                <td>${formatCurrency(item.total_amount)}</td>
-                            </tr>
-                        `;
-                    });
-                    
-                    if (importsTableHtml === '') {
-                        importsTableHtml = '<tr><td colspan="6" class="text-center">Không có dữ liệu</td></tr>';
-                    }
-                    document.getElementById('importsTableBody').innerHTML = importsTableHtml;
-                    
-                    // Hiển thị dữ liệu xuất kho
-                    let exportsTableHtml = '';
-                    data.exports.forEach(item => {
-                        exportsTableHtml += `
-                            <tr>
-                                <td>${formatDate(item.export_date)}</td>
-                                <td>${item.warehouse_name}</td>
-                                <td>${item.total_exports}</td>
-                                <td>${item.total_quantity}</td>
-                                <td>${formatCurrency(item.total_amount)}</td>
-                            </tr>
-                        `;
-                    });
-                    
-                    if (exportsTableHtml === '') {
-                        exportsTableHtml = '<tr><td colspan="5" class="text-center">Không có dữ liệu</td></tr>';
-                    }
-                    document.getElementById('exportsTableBody').innerHTML = exportsTableHtml;
-                    
-                    // Phân tích nhà cung cấp
-                    let suppliersTableHtml = '';
-                    
-                    data.suppliers.forEach(item => {
-                        suppliersTableHtml += `
-                            <tr>
-                                <td>${item.supplier_name}</td>
-                                <td>${item.total_imports}</td>
-                                <td>${item.total_quantity}</td>
-                                <td>${formatCurrency(item.total_amount)}</td>
-                                <td>${item.percentage}%</td>
-                            </tr>
-                        `;
-                    });
-                    
-                    if (suppliersTableHtml === '') {
-                        suppliersTableHtml = '<tr><td colspan="5" class="text-center">Không có dữ liệu</td></tr>';
-                    }
-                    document.getElementById('suppliersTableBody').innerHTML = suppliersTableHtml;
-                    
-                    // Vẽ biểu đồ nhập/xuất theo thời gian
-                    if (ioTimeChart) {
-                        ioTimeChart.destroy();
-                    }
-                    
-                    const ioTimeLabels = [];
-                    const importValues = [];
-                    const exportValues = [];
-                    
-                    // Tạo nhãn và dữ liệu cho biểu đồ
-                    data.timeSeriesData.forEach(item => {
-                        ioTimeLabels.push(formatDate(item.date));
-                        importValues.push(item.import_value);
-                        exportValues.push(item.export_value);
-                    });
-                    
-                    // Vẽ biểu đồ nhập/xuất theo thời gian
-                    const ctxIOTime = document.getElementById('ioTimeChart').getContext('2d');
-                    ioTimeChart = new Chart(ctxIOTime, {
-                        type: 'line',
-                        data: {
-                            labels: ioTimeLabels,
-                            datasets: [
-                                {
-                                    label: 'Giá trị nhập kho',
-                                    data: importValues,
-                                    borderColor: '#4e73df',
-                                    backgroundColor: 'rgba(78, 115, 223, 0.1)',
-                                    tension: 0.3,
-                                    fill: true
-                                },
-                                {
-                                    label: 'Giá trị xuất kho',
-                                    data: exportValues,
-                                    borderColor: '#e74a3b',
-                                    backgroundColor: 'rgba(231, 74, 59, 0.1)',
-                                    tension: 0.3,
-                                    fill: true
-                                }
-                            ]
-                        },
-                        options: {
-                            responsive: true,
-                            scales: {
-                                y: {
-                                    ticks: {
-                                        callback: function(value) {
-                                            return formatCurrency(value);
-                                        }
-                                    }
-                                }
-                            },
-                            plugins: {
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            const label = context.dataset.label || '';
-                                            const value = context.raw;
-                                            return `${label}: ${formatCurrency(value)}`;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    
-                    // Vẽ biểu đồ top 5 nhà cung cấp theo giá trị
-                    if (supplierValueChart) {
-                        supplierValueChart.destroy();
-                    }
-                    
-                    const top5Suppliers = data.suppliers.slice(0, 5);
-                    const supplierLabels = top5Suppliers.map(item => item.supplier_name);
-                    const supplierValues = top5Suppliers.map(item => parseFloat(item.total_amount));
-                    const supplierValueColors = getColorArray(5);
-                    
-                    const ctxSupplierValue = document.getElementById('supplierValueChart').getContext('2d');
-                    supplierValueChart = new Chart(ctxSupplierValue, {
-                        type: 'bar',
-                        data: {
-                            labels: supplierLabels,
-                            datasets: [{
-                                label: 'Giá trị nhập kho',
-                                data: supplierValues,
-                                backgroundColor: supplierValueColors
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            scales: {
-                                y: {
-                                    ticks: {
-                                        callback: function(value) {
-                                            return formatCurrency(value);
-                                        }
-                                    }
-                                }
-                            },
-                            plugins: {
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            const value = context.raw;
-                                            return `Giá trị: ${formatCurrency(value)}`;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                    
-                    // Vẽ biểu đồ top 5 nhà cung cấp theo số lượng
-                    if (supplierQuantityChart) {
-                        supplierQuantityChart.destroy();
-                    }
-                    
-                    const supplierQuantities = top5Suppliers.map(item => parseInt(item.total_quantity));
-                    const supplierQuantityColors = getColorArray(5, true);
-                    
-                    const ctxSupplierQuantity = document.getElementById('supplierQuantityChart').getContext('2d');
-                    supplierQuantityChart = new Chart(ctxSupplierQuantity, {
-                        type: 'bar',
-                        data: {
-                            labels: supplierLabels,
-                            datasets: [{
-                                label: 'Số lượng nhập kho',
-                                data: supplierQuantities,
-                                backgroundColor: supplierQuantityColors
-                            }]
-                        },
-                        options: {
-                            responsive: true
-                        }
-                    });
-                } else {
-                    document.getElementById('importsTableBody').innerHTML = '<tr><td colspan="6" class="text-center">Không có dữ liệu</td></tr>';
-                    document.getElementById('exportsTableBody').innerHTML = '<tr><td colspan="5" class="text-center">Không có dữ liệu</td></tr>';
-                    document.getElementById('suppliersTableBody').innerHTML = '<tr><td colspan="5" class="text-center">Không có dữ liệu</td></tr>';
-                }
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải báo cáo nhập/xuất:', error);
-                document.getElementById('importsTableBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger">Đã xảy ra lỗi khi tải dữ liệu</td></tr>';
-                document.getElementById('exportsTableBody').innerHTML = '<tr><td colspan="5" class="text-center text-danger">Đã xảy ra lỗi khi tải dữ liệu</td></tr>';
-                document.getElementById('suppliersTableBody').innerHTML = '<tr><td colspan="5" class="text-center text-danger">Đã xảy ra lỗi khi tải dữ liệu</td></tr>';
-            });
+        });
     }
     
-    // Hàm phân tích kho
-    function generateWarehouseAnalysis() {
-        const warehouseId = document.getElementById('warehouseFilter').value;
-        
-        // Hiển thị loading
-        document.getElementById('shelvesTableBody').innerHTML = '<tr><td colspan="7" class="text-center">Đang tải dữ liệu...</td></tr>';
-        
-        // Gọi API để lấy dữ liệu
-        fetch(`ajax/shelf_report.php?warehouse_id=${warehouseId}`)
-            .then(response => response.json())
-            .then(data => {
-                // Tính toán thống kê tổng quan
-                let totalShelves = data.length;
-                let usedCapacity = 0;
-                let totalCapacity = 0;
-                let highUtilizationShelves = 0;
-                let lowUtilizationShelves = 0;
-                
-                data.forEach(item => {
-                    let usedCap = parseFloat(item.used_capacity);
-                    let maxCap = parseFloat(item.max_capacity);
-                    totalCapacity += maxCap;
-                    usedCapacity += usedCap;
-                    
-                    if (item.utilization_level === 'Cao') {
-                        highUtilizationShelves++;
-                    }
-                    if (item.utilization_level === 'Thấp') {
-                        lowUtilizationShelves++;
-                    }
-                });
-                
-                let utilizationPercentage = totalCapacity > 0 ? (usedCapacity / totalCapacity * 100).toFixed(2) : 0;
-                
-                // Cập nhật thống kê tổng quan
-                document.getElementById('totalShelves').textContent = totalShelves;
-                document.getElementById('usedCapacity').textContent = utilizationPercentage + '%';
-                document.getElementById('highUtilizationShelves').textContent = highUtilizationShelves;
-                document.getElementById('lowUtilizationShelves').textContent = lowUtilizationShelves;
-                
-                // Hiển thị dữ liệu trong bảng
-                let tableHtml = '';
-                data.forEach(item => {
-                    let utilizationClass = '';
-                    if (item.utilization_level === 'Thấp') {
-                        utilizationClass = 'text-success';
-                    } else if (item.utilization_level === 'Trung bình') {
-                        utilizationClass = 'text-warning';
-                    } else {
-                        utilizationClass = 'text-danger';
-                    }
-                    
-                    tableHtml += `
-                        <tr>
-                            <td>${item.shelf_code}</td>
-                            <td>${item.zone_code}</td>
-                            <td>${item.warehouse_name}</td>
-                            <td>${parseFloat(item.max_capacity).toFixed(2)}</td>
-                            <td>${parseFloat(item.used_capacity).toFixed(2)}</td>
-                            <td>${parseFloat(item.utilization_percentage).toFixed(2)}%</td>
-                            <td class="${utilizationClass}">${item.utilization_level}</td>
-                        </tr>
-                    `;
-                });
-                
-                if (tableHtml === '') {
-                    tableHtml = '<tr><td colspan="7" class="text-center">Không có dữ liệu</td></tr>';
-                }
-                document.getElementById('shelvesTableBody').innerHTML = tableHtml;
-                
-                // Vẽ biểu đồ mức độ sử dụng kệ
-                if (shelfUtilizationChart) {
-                    shelfUtilizationChart.destroy();
-                }
-                
-                const utilizationLevels = ['Thấp', 'Trung bình', 'Cao'];
-                const utilizationCounts = [lowUtilizationShelves, totalShelves - lowUtilizationShelves - highUtilizationShelves, highUtilizationShelves];
-                const utilizationColors = ['#1cc88a', '#f6c23e', '#e74a3b'];
-                
-                const ctxShelfUtilization = document.getElementById('shelfUtilizationChart').getContext('2d');
-                shelfUtilizationChart = new Chart(ctxShelfUtilization, {
-                    type: 'pie',
-                    data: {
-                        labels: utilizationLevels,
-                        datasets: [{
-                            data: utilizationCounts,
-                            backgroundColor: utilizationColors
-                        }]
+    // Biểu đồ phân bổ tồn kho theo danh mục
+    const ctxCategory = document.getElementById('inventoryCategoryChart');
+    if (ctxCategory) {
+        new Chart(ctxCategory, {
+            type: 'pie',
+            data: {
+                labels: <?= $category_labels ?>,
+                datasets: [{
+                    data: <?= $category_values ?>,
+                    backgroundColor: [
+                        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#6f42c1',
+                        '#fd7e14', '#20c997', '#6c757d', '#17a2b8', '#dc3545', '#28a745'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right'
                     },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            legend: {
-                                position: 'right'
-                            },
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) {
-                                        const value = context.raw;
-                                        const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
-                                        const percentage = ((value / total) * 100).toFixed(2);
-                                        return `${context.label}: ${value} kệ (${percentage}%)`;
-                                    }
-                                }
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(2);
+                                return `${context.label}: ${formatCurrency(value)} (${percentage}%)`;
                             }
                         }
                     }
-                });
-                
-                // Vẽ biểu đồ dự báo nhu cầu không gian kho
-                if (warehouseCapacityForecastChart) {
-                    warehouseCapacityForecastChart.destroy();
                 }
-                
-                // Tạo dữ liệu giả định cho biểu đồ dự báo
-                // Trong thực tế, cần phải tính toán dự báo dựa trên dữ liệu lịch sử
-                const forecastMonths = ['Hiện tại', '1 tháng', '2 tháng', '3 tháng', '4 tháng', '5 tháng', '6 tháng'];
-                
-                // Giả định tốc độ tăng trưởng 5% mỗi tháng
-                let forecastData = [utilizationPercentage];
-                let currentUtil = parseFloat(utilizationPercentage);
-                
-                for (let i = 1; i < 7; i++) {
-                    currentUtil = Math.min(currentUtil * 1.05, 100); // Tăng 5% mỗi tháng, tối đa 100%
-                    forecastData.push(currentUtil.toFixed(2));
-                }
-                
-                const ctxForecast = document.getElementById('warehouseCapacityForecastChart').getContext('2d');
-                warehouseCapacityForecastChart = new Chart(ctxForecast, {
-                    type: 'line',
-                    data: {
-                        labels: forecastMonths,
-                        datasets: [{
-                            label: 'Dự báo công suất sử dụng (%)',
-                            data: forecastData,
-                            borderColor: '#4e73df',
-                            backgroundColor: 'rgba(78, 115, 223, 0.1)',
-                            tension: 0.3,
-                            fill: true
-                        }]
+            }
+        });
+    }
+    
+    // Biểu đồ phân bổ tồn kho theo kho
+    const ctxWarehouse = document.getElementById('inventoryWarehouseChart');
+    if (ctxWarehouse) {
+        new Chart(ctxWarehouse, {
+            type: 'doughnut',
+            data: {
+                labels: <?= $warehouse_labels ?>,
+                datasets: [{
+                    data: <?= $warehouse_values ?>,
+                    backgroundColor: [
+                        '#1cc88a', '#4e73df', '#36b9cc', '#f6c23e', '#e74a3b', '#6f42c1',
+                        '#fd7e14', '#20c997', '#6c757d', '#17a2b8', '#dc3545', '#28a745'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right'
                     },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            y: {
-                                min: 0,
-                                max: 100,
-                                ticks: {
-                                    callback: function(value) {
-                                        return value + '%';
-                                    }
-                                }
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                const percentage = ((value / total) * 100).toFixed(2);
+                                return `${context.label}: ${formatCurrency(value)} (${percentage}%)`;
                             }
                         }
                     }
-                });
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải phân tích kho:', error);
-                document.getElementById('shelvesTableBody').innerHTML = '<tr><td colspan="7" class="text-center text-danger">Đã xảy ra lỗi khi tải dữ liệu</td></tr>';
-            });
+                }
+            }
+        });
     }
     
-    // Hàm tạo báo cáo hạn sử dụng
-    function generateExpiryReport() {
-        const warehouseId = document.getElementById('expiryWarehouseFilter').value;
-        const daysThreshold = document.getElementById('expiryDaysFilter').value;
-        
-        // Hiển thị loading
-        document.getElementById('expiryTableBody').innerHTML = '<tr><td colspan="8" class="text-center">Đang tải dữ liệu...</td></tr>';
-        
-        // Gọi API để lấy dữ liệu
-        fetch(`ajax/expiry_report.php?warehouse_id=${warehouseId}&days_threshold=${daysThreshold}`)
-            .then(response => response.json())
-            .then(data => {
-                // Tính toán thống kê
-                let totalProducts = data.length;
-                let urgent30Days = 0;
-                let urgent7Days = 0;
-                
-                data.forEach(item => {
-                    if (parseInt(item.days_until_expiry) <= 30) {
-                        urgent30Days++;
-                    }
-                    if (parseInt(item.days_until_expiry) <= 7) {
-                        urgent7Days++;
-                    }
-                });
-                
-                // Cập nhật thống kê tổng quan
-                document.getElementById('totalExpiringProducts').textContent = totalProducts;
-                document.getElementById('urgent30DaysProducts').textContent = urgent30Days;
-                document.getElementById('urgent7DaysProducts').textContent = urgent7Days;
-                
-                // Hiển thị dữ liệu trong bảng
-                let tableHtml = '';
-                data.forEach(item => {
-                    let daysClass = '';
-                    let daysRemaining = parseInt(item.days_until_expiry);
-                    
-                    if (daysRemaining <= 7) {
-                        daysClass = 'text-danger fw-bold';
-                    } else if (daysRemaining <= 30) {
-                        daysClass = 'text-warning fw-bold';
-                    } else {
-                        daysClass = 'text-info';
-                    }
-                    
-                    tableHtml += `
-                        <tr>
-                            <td>${item.product_code}</td>
-                            <td>${item.product_name}</td>
-                            <td>${item.warehouse_name}</td>
-                            <td>${item.shelf_code}</td>
-                            <td>${item.batch_number || 'N/A'}</td>
-                            <td>${formatDate(item.expiry_date)}</td>
-                            <td class="${daysClass}">${item.days_until_expiry}</td>
-                            <td>${item.quantity}</td>
-                        </tr>
-                    `;
-                });
-                
-                if (tableHtml === '') {
-                    tableHtml = '<tr><td colspan="8" class="text-center">Không có sản phẩm gần hết hạn trong khoảng thời gian đã chọn</td></tr>';
-                }
-                document.getElementById('expiryTableBody').innerHTML = tableHtml;
-                
-                // Vẽ biểu đồ phân bổ sản phẩm gần hết hạn
-                if (expiryDistributionChart) {
-                    expiryDistributionChart.destroy();
-                }
-                
-                // Nhóm sản phẩm theo ngày còn lại
-                const expiryGroups = {
-                    '<= 7 ngày': 0,
-                    '8-15 ngày': 0,
-                    '16-30 ngày': 0,
-                    '31-60 ngày': 0,
-                    '61-90 ngày': 0,
-                    '> 90 ngày': 0
-                };
-                
-                data.forEach(item => {
-                    const days = parseInt(item.days_until_expiry);
-                    const quantity = parseInt(item.quantity);
-                    
-                    if (days <= 7) {
-                        expiryGroups['<= 7 ngày'] += quantity;
-                    } else if (days <= 15) {
-                        expiryGroups['8-15 ngày'] += quantity;
-                    } else if (days <= 30) {
-                        expiryGroups['16-30 ngày'] += quantity;
-                    } else if (days <= 60) {
-                        expiryGroups['31-60 ngày'] += quantity;
-                    } else if (days <= 90) {
-                        expiryGroups['61-90 ngày'] += quantity;
-                    } else {
-                        expiryGroups['> 90 ngày'] += quantity;
-                    }
-                });
-                
-                const expiryLabels = Object.keys(expiryGroups);
-                const expiryValues = Object.values(expiryGroups);
-                const expiryColors = ['#e74a3b', '#f6c23e', '#4e73df', '#1cc88a', '#36b9cc', '#6f42c1'];
-                
-                const ctxExpiry = document.getElementById('expiryDistributionChart').getContext('2d');
-                expiryDistributionChart = new Chart(ctxExpiry, {
-                    type: 'bar',
-                    data: {
-                        labels: expiryLabels,
-                        datasets: [{
-                            label: 'Số lượng sản phẩm',
-                            data: expiryValues,
-                            backgroundColor: expiryColors
-                        }]
+    // Biểu đồ nhập/xuất theo thời gian
+    const ctxIOTime = document.getElementById('ioTimeChart');
+    if (ctxIOTime) {
+        new Chart(ctxIOTime, {
+            type: 'line',
+            data: {
+                labels: <?= $time_labels_json ?>,
+                datasets: [
+                    {
+                        label: 'Giá trị nhập kho',
+                        data: <?= $import_values_json ?>,
+                        borderColor: '#4e73df',
+                        backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                        tension: 0.3,
+                        fill: true
                     },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            y: {
-                                beginAtZero: true
+                    {
+                        label: 'Giá trị xuất kho',
+                        data: <?= $export_values_json ?>,
+                        borderColor: '#e74a3b',
+                        backgroundColor: 'rgba(231, 74, 59, 0.1)',
+                        tension: 0.3,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
                             }
                         }
                     }
-                });
-            })
-            .catch(error => {
-                console.error('Lỗi khi tải báo cáo hạn sử dụng:', error);
-                document.getElementById('expiryTableBody').innerHTML = '<tr><td colspan="8" class="text-center text-danger">Đã xảy ra lỗi khi tải dữ liệu</td></tr>';
-            });
-    }
-    
-    // Hàm hỗ trợ xuất Excel
-    function exportToExcel(reportType) {
-        let queryParams = '';
-        
-        switch (reportType) {
-            case 'inventory':
-                queryParams = `?warehouseId=${document.getElementById('inventoryWarehouseFilter').value}&categoryId=${document.getElementById('inventoryCategoryFilter').value}&stockLevel=${document.getElementById('inventoryStockLevelFilter').value}`;
-                window.open(`ajax/export_excel.php${queryParams}&reportType=inventory`, '_blank');
-                break;
-            case 'imports':
-                queryParams = `?warehouseId=${document.getElementById('ioWarehouseFilter').value}&dateRange=${document.getElementById('ioDateRangeFilter').value}`;
-                if (document.getElementById('ioDateRangeFilter').value === 'custom') {
-                    queryParams += `&startDate=${document.getElementById('ioStartDate').value}&endDate=${document.getElementById('ioEndDate').value}`;
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.dataset.label || '';
+                                const value = context.raw;
+                                return `${label}: ${formatCurrency(value)}`;
+                            }
+                        }
+                    }
                 }
-                window.open(`ajax/export_excel.php${queryParams}&reportType=imports`, '_blank');
-                break;
-            case 'exports':
-                queryParams = `?warehouseId=${document.getElementById('ioWarehouseFilter').value}&dateRange=${document.getElementById('ioDateRangeFilter').value}`;
-                if (document.getElementById('ioDateRangeFilter').value === 'custom') {
-                    queryParams += `&startDate=${document.getElementById('ioStartDate').value}&endDate=${document.getElementById('ioEndDate').value}`;
+            }
+        });
+    }
+    
+    // Biểu đồ top 5 nhà cung cấp theo giá trị
+    const ctxSupplierValue = document.getElementById('supplierValueChart');
+    if (ctxSupplierValue) {
+        new Chart(ctxSupplierValue, {
+            type: 'bar',
+            data: {
+                labels: <?= $supplier_labels_json ?>,
+                datasets: [{
+                    label: 'Giá trị nhập kho',
+                    data: <?= $supplier_values_json ?>,
+                    backgroundColor: [
+                        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return formatCurrency(value);
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                return `Giá trị: ${formatCurrency(value)}`;
+                            }
+                        }
+                    }
                 }
-                window.open(`ajax/export_excel.php${queryParams}&reportType=exports`, '_blank');
-                break;
-            case 'shelves':
-                queryParams = `?warehouseId=${document.getElementById('warehouseFilter').value}`;
-                window.open(`ajax/export_excel.php${queryParams}&reportType=shelves`, '_blank');
-                break;
-            case 'expiry':
-                queryParams = `?warehouseId=${document.getElementById('expiryWarehouseFilter').value}&daysThreshold=${document.getElementById('expiryDaysFilter').value}`;
-                window.open(`ajax/export_excel.php${queryParams}&reportType=expiry`, '_blank');
-                break;
-        }
+            }
+        });
     }
     
-    // Hàm hỗ trợ xuất PDF
-    function exportToPDF(reportType) {
-        let queryParams = '';
-        
-        switch (reportType) {
-            case 'inventory':
-                queryParams = `?warehouseId=${document.getElementById('inventoryWarehouseFilter').value}&categoryId=${document.getElementById('inventoryCategoryFilter').value}&stockLevel=${document.getElementById('inventoryStockLevelFilter').value}`;
-                window.open(`ajax/export_pdf.php${queryParams}&reportType=inventory`, '_blank');
-                break;
-            case 'expiry':
-                queryParams = `?warehouseId=${document.getElementById('expiryWarehouseFilter').value}&daysThreshold=${document.getElementById('expiryDaysFilter').value}`;
-                window.open(`ajax/export_pdf.php${queryParams}&reportType=expiry`, '_blank');
-                break;
-        }
+    // Biểu đồ top 5 nhà cung cấp theo số lượng
+    const ctxSupplierQuantity = document.getElementById('supplierQuantityChart');
+    if (ctxSupplierQuantity) {
+        new Chart(ctxSupplierQuantity, {
+            type: 'bar',
+            data: {
+                labels: <?= $supplier_labels_json ?>,
+                datasets: [{
+                    label: 'Số lượng nhập kho',
+                    data: <?= $supplier_quantities_json ?>,
+                    backgroundColor: [
+                        '#f94144', '#f3722c', '#f8961e', '#f9c74f', '#90be6d'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true
+            }
+        });
     }
     
-    // Hàm tiện ích định dạng tiền tệ
+    // Biểu đồ mức độ sử dụng kệ
+    const ctxShelfUtilization = document.getElementById('shelfUtilizationChart');
+    if (ctxShelfUtilization) {
+        new Chart(ctxShelfUtilization, {
+            type: 'pie',
+            data: {
+                labels: <?= $utilization_labels ?>,
+                datasets: [{
+                    data: <?= $utilization_values ?>,
+                    backgroundColor: [
+                        '#1cc88a', '#f6c23e', '#e74a3b'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? ((value / total) * 100).toFixed(2) : 0;
+                                return `${context.label}: ${value} kệ (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Biểu đồ dự báo nhu cầu không gian kho
+    const ctxForecast = document.getElementById('warehouseCapacityForecastChart');
+    if (ctxForecast) {
+        new Chart(ctxForecast, {
+            type: 'line',
+            data: {
+                labels: <?= $forecast_labels_json ?>,
+                datasets: [{
+                    label: 'Dự báo công suất sử dụng (%)',
+                    data: <?= $forecast_data_json ?>,
+                    borderColor: '#4e73df',
+                    backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Biểu đồ phân bổ sản phẩm gần hết hạn
+    const ctxExpiry = document.getElementById('expiryDistributionChart');
+    if (ctxExpiry) {
+        new Chart(ctxExpiry, {
+            type: 'bar',
+            data: {
+                labels: <?= $expiry_labels ?>,
+                datasets: [{
+                    label: 'Số lượng sản phẩm',
+                    data: <?= $expiry_values ?>,
+                    backgroundColor: [
+                        '#e74a3b', '#f6c23e', '#4e73df', '#1cc88a', '#36b9cc'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+    
+    // Hàm định dạng tiền tệ
     function formatCurrency(value) {
         return new Intl.NumberFormat('vi-VN', {
             style: 'currency',
@@ -1460,40 +1480,5 @@ document.addEventListener('DOMContentLoaded', function() {
             minimumFractionDigits: 0
         }).format(value);
     }
-    
-    // Hàm tiện ích định dạng ngày
-    function formatDate(dateString) {
-        const date = new Date(dateString);
-        return new Intl.DateTimeFormat('vi-VN').format(date);
-    }
-    
-    // Hàm tạo màu ngẫu nhiên
-    function getRandomColor() {
-        const letters = '0123456789ABCDEF';
-        let color = '#';
-        for (let i = 0; i < 6; i++) {
-            color += letters[Math.floor(Math.random() * 16)];
-        }
-        return color;
-    }
-    
-    // Hàm tạo mảng màu
-    function getColorArray(count, usePastel = false) {
-        const colors = [];
-        if (usePastel) {
-            // Màu pastel
-            const baseColors = ['#f94144', '#f3722c', '#f8961e', '#f9c74f', '#90be6d', '#43aa8b', '#577590'];
-            for (let i = 0; i < count; i++) {
-                colors.push(baseColors[i % baseColors.length]);
-            }
-        } else {
-            // Màu cơ bản
-            const baseColors = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#6f42c1', '#5a5c69'];
-            for (let i = 0; i < count; i++) {
-                colors.push(baseColors[i % baseColors.length]);
-            }
-        }
-        return colors;
-    }
 });
-</script>
+</script>     

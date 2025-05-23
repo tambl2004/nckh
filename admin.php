@@ -11,13 +11,16 @@ if (!isLoggedIn()) {
 
 // Lấy thông tin avatar từ database
 $avatar = 'image/avata.jpg'; // Avatar mặc định
-if(isset($_SESSION['user_id'])) {
+if (isset($_SESSION['user_id'])) {
     $user_id = $_SESSION['user_id'];
-    $sql = "SELECT avatar FROM users WHERE user_id = '$user_id'";
-    $result = $conn->query($sql);
-    if($result && $result->num_rows > 0) {
-        $user_data = $result->fetch_assoc();
-        if(!empty($user_data['avatar'])) {
+    
+    // Sử dụng PDO để lấy thông tin avatar
+    $stmt = $pdo->prepare("SELECT avatar FROM users WHERE user_id = :user_id");
+    $stmt->execute(['user_id' => $user_id]);
+    
+    if ($stmt->rowCount() > 0) {
+        $user_data = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!empty($user_data['avatar'])) {
             $avatar = $user_data['avatar'];
         }
     }
@@ -90,6 +93,12 @@ $option = isset($_GET['option']) ? $_GET['option'] : 'home';
                     <span>Xuất kho</span>
                 </a>
             </li>
+            <li class="nav-item <?php echo ($option == 'chuyenkho') ? 'active' : ''; ?>">
+                <a class="nav-link" href="?option=chuyenkho">
+                    <i class="fas fa-exchange-alt"></i>
+                    <span>Chuyển kho</span>
+                </a>
+            </li>
             <li class="nav-item <?php echo ($option == 'kiemke') ? 'active' : ''; ?>">
                 <a class="nav-link" href="?option=kiemke">
                     <i class="fas fa-check-square"></i>
@@ -151,6 +160,9 @@ $option = isset($_GET['option']) ? $_GET['option'] : 'home';
             case 'xuatkho':
                 include 'views/xuatkho.php';
                 break;
+            case 'chuyenkho':
+                include 'views/chuyenkho.php';
+                break;
             case 'kiemke':
                 include 'views/kiemke.php';
                 break;
@@ -175,7 +187,6 @@ $option = isset($_GET['option']) ? $_GET['option'] : 'home';
     <script src="js/bootstrap.bundle.min.js"></script>
     <?php if ($option == 'home' || $option == 'thongke') { ?>
         <script src="js/chart.js"></script>
-        <script src="js/tongquan.js"></script>
     <?php } ?>
 </body>
 </html>

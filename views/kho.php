@@ -381,853 +381,465 @@ function suggestShelfLocation($product_id, $warehouse_id, $quantity) {
     <h4 class="page-title">Quản lý kho hàng</h4>
     
     <!-- Tab Navigation -->
-    <ul class="nav nav-tabs mb-4">
-        <li class="nav-item">
-            <a class="nav-link <?php echo ($tab == 'kho') ? 'active' : ''; ?>" href="?option=kho&tab=kho">Kho hàng</a>
+    <ul class="nav nav-tabs mb-4" id="warehouseTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link <?php echo ($tab == 'kho') ? 'active' : ''; ?>" id="warehouse-tab" data-bs-toggle="tab" data-bs-target="#kho" type="button" role="tab" aria-controls="kho" aria-selected="<?php echo $tab == 'kho' ? 'true' : 'false'; ?>">
+                Kho hàng
+            </button>
         </li>
-        <li class="nav-item">
-            <a class="nav-link <?php echo ($tab == 'khu_vuc') ? 'active' : ''; ?>" href="?option=kho&tab=khu_vuc">Khu vực kho</a>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link <?php echo ($tab == 'khu_vuc') ? 'active' : ''; ?>" id="zone-tab" data-bs-toggle="tab" data-bs-target="#khu_vuc" type="button" role="tab" aria-controls="khu_vuc" aria-selected="<?php echo $tab == 'khu_vuc' ? 'true' : 'false'; ?>">
+                Khu vực kho
+            </button>
         </li>
-        <li class="nav-item">
-            <a class="nav-link <?php echo ($tab == 'ke') ? 'active' : ''; ?>" href="?option=kho&tab=ke">Kệ kho</a>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link <?php echo ($tab == 'ke') ? 'active' : ''; ?>" id="shelf-tab" data-bs-toggle="tab" data-bs-target="#ke" type="button" role="tab" aria-controls="ke" aria-selected="<?php echo $tab == 'ke' ? 'true' : 'false'; ?>">
+                Kệ kho
+            </button>
         </li>
-        <li class="nav-item">
-            <a class="nav-link <?php echo ($tab == 'vi_tri') ? 'active' : ''; ?>" href="?option=kho&tab=vi_tri">Vị trí sản phẩm</a>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link <?php echo ($tab == 'vi_tri') ? 'active' : ''; ?>" id="location-tab" data-bs-toggle="tab" data-bs-target="#vi_tri" type="button" role="tab" aria-controls="vi_tri" aria-selected="<?php echo $tab == 'vi_tri' ? 'true' : 'false'; ?>">
+                Vị trí sản phẩm
+            </button>
         </li>
-        <li class="nav-item">
-            <a class="nav-link <?php echo ($tab == 'bao_cao') ? 'active' : ''; ?>" href="?option=kho&tab=bao_cao">Báo cáo kho</a>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link <?php echo ($tab == 'bao_cao') ? 'active' : ''; ?>" id="report-tab" data-bs-toggle="tab" data-bs-target="#bao_cao" type="button" role="tab" aria-controls="bao_cao" aria-selected="<?php echo $tab == 'bao_cao' ? 'true' : 'false'; ?>">
+                Báo cáo kho
+            </button>
         </li>
     </ul>
     
     <!-- Tab Content -->
-    <div class="tab-content">
-        <?php if ($tab == 'kho'): ?>
-            <!-- Tab Kho hàng -->
-            <div class="tab-pane active">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h5>Danh sách kho hàng</h5>
-                    <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addWarehouseModal">
-                        <i class="fas fa-plus-circle me-2"></i>Thêm kho mới
-                    </button>
-                </div>
-                
-                <div class="table-responsive">
-                    <table class="data-table table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th width="5%">ID</th>
-                                <th width="20%">Tên kho</th>
-                                <th width="35%">Địa chỉ</th>
-                                <th width="15%">Người liên hệ</th>
-                                <th width="15%">Số điện thoại</th>
-                                <th width="10%">Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php
-                            $sql = "SELECT * FROM warehouses ORDER BY warehouse_id DESC";
-                            $result = $conn->query($sql);
-                            
-                            if ($result->num_rows > 0) {
-                                while ($row = $result->fetch_assoc()) {
-                                    echo "<tr>
-                                            <td>{$row['warehouse_id']}</td>
-                                            <td>{$row['warehouse_name']}</td>
-                                            <td>{$row['address']}</td>
-                                            <td>{$row['contact_person']}</td>
-                                            <td>{$row['contact_phone']}</td>
-                                            <td>
-                                                <div class='action-buttons'>
-                                                    <button class='btn btn-edit' onclick='editWarehouse({$row['warehouse_id']})' 
-                                                        data-id='{$row['warehouse_id']}' 
-                                                        data-name='{$row['warehouse_name']}'
-                                                        data-address='{$row['address']}'
-                                                        data-contact='{$row['contact_person']}'
-                                                        data-phone='{$row['contact_phone']}'>
-                                                        <i class='fas fa-edit'></i>
-                                                    </button>
-                                                    <button class='btn btn-delete' onclick='confirmDelete({$row['warehouse_id']}, \"warehouse\")'>
-                                                        <i class='fas fa-trash-alt'></i>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                          </tr>";
-                                }
-                            } else {
-                                echo "<tr><td colspan='6' class='text-center'>Không có dữ liệu kho hàng</td></tr>";
-                            }
-                            ?>
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Modal thêm kho -->
-                <div class="modal fade" id="addWarehouseModal" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Thêm kho mới</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body">
-                                <form method="post" id="addWarehouseForm">
-                                    <div class="form-group mb-3">
-                                        <label for="warehouse_name">Tên kho <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" id="warehouse_name" name="warehouse_name" required>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="address">Địa chỉ</label>
-                                        <textarea class="form-control" id="address" name="address" rows="2"></textarea>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="contact_person">Người liên hệ</label>
-                                        <input type="text" class="form-control" id="contact_person" name="contact_person">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="contact_phone">Số điện thoại</label>
-                                        <input type="text" class="form-control" id="contact_phone" name="contact_phone">
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                                        <button type="submit" name="add_warehouse" class="btn btn-primary">Thêm mới</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Modal sửa kho -->
-                <div class="modal fade" id="editWarehouseModal" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Sửa thông tin kho</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body">
-                                <form method="post" id="editWarehouseForm">
-                                    <input type="hidden" id="edit_warehouse_id" name="warehouse_id">
-                                    <div class="form-group mb-3">
-                                        <label for="edit_warehouse_name">Tên kho <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" id="edit_warehouse_name" name="warehouse_name" required>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="edit_address">Địa chỉ</label>
-                                        <textarea class="form-control" id="edit_address" name="address" rows="2"></textarea>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="edit_contact_person">Người liên hệ</label>
-                                        <input type="text" class="form-control" id="edit_contact_person" name="contact_person">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="edit_contact_phone">Số điện thoại</label>
-                                        <input type="text" class="form-control" id="edit_contact_phone" name="contact_phone">
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                                        <button type="submit" name="update_warehouse" class="btn btn-primary">Cập nhật</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+    <div class="tab-content" id="warehouseTabsContent">
+        <!-- Tab Kho hàng -->
+        <div class="tab-pane fade <?php echo ($tab == 'kho') ? 'show active' : ''; ?>" id="kho" role="tabpanel" aria-labelledby="warehouse-tab">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5>Danh sách kho hàng</h5>
+                <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addWarehouseModal">
+                    <i class="fas fa-plus-circle me-2"></i>Thêm kho mới
+                </button>
             </div>
             
-        <?php elseif ($tab == 'khu_vuc'): ?>
-            <!-- Tab Khu vực kho -->
-            <div class="tab-pane active">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h5>Danh sách khu vực kho</h5>
-                    <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addZoneModal">
-                        <i class="fas fa-plus-circle me-2"></i>Thêm khu vực mới
-                    </button>
-                </div>
-                
-                <div class="table-responsive">
-                    <table class="data-table table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th width="5%">ID</th>
-                                <th width="15%">Mã khu vực</th>
-                                <th width="20%">Tên khu vực</th>
-                                <th width="25%">Kho</th>
-                                <th width="25%">Mô tả</th>
-                                <th width="10%">Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php
-                            $sql = "SELECT wz.*, w.warehouse_name 
-                                    FROM warehouse_zones wz
-                                    JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
-                                    ORDER BY wz.zone_id DESC";
-                            $result = $conn->query($sql);
-                            
-                            if ($result->num_rows > 0) {
-                                while ($row = $result->fetch_assoc()) {
-                                    echo "<tr>
-                                            <td>{$row['zone_id']}</td>
-                                            <td>{$row['zone_code']}</td>
-                                            <td>{$row['zone_name']}</td>
-                                            <td>{$row['warehouse_name']}</td>
-                                            <td>{$row['description']}</td>
-                                            <td>
-                                                <div class='action-buttons'>
-                                                    <button class='btn btn-edit' onclick='editZone({$row['zone_id']})' 
-                                                        data-id='{$row['zone_id']}' 
-                                                        data-code='{$row['zone_code']}'
-                                                        data-name='{$row['zone_name']}'
-                                                        data-description='{$row['description']}'>
-                                                        <i class='fas fa-edit'></i>
-                                                    </button>
-                                                    <button class='btn btn-delete' onclick='confirmDelete({$row['zone_id']}, \"zone\")'>
-                                                        <i class='fas fa-trash-alt'></i>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                          </tr>";
-                                }
-                            } else {
-                                echo "<tr><td colspan='6' class='text-center'>Không có dữ liệu khu vực kho</td></tr>";
+            <div class="table-responsive">
+                <table class="data-table table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th width="5%">ID</th>
+                            <th width="20%">Tên kho</th>
+                            <th width="35%">Địa chỉ</th>
+                            <th width="15%">Người liên hệ</th>
+                            <th width="15%">Số điện thoại</th>
+                            <th width="10%">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $sql = "SELECT * FROM warehouses ORDER BY warehouse_id DESC";
+                        $result = $conn->query($sql);
+                        
+                        if ($result->num_rows > 0) {
+                            while ($row = $result->fetch_assoc()) {
+                                echo "<tr>
+                                        <td>{$row['warehouse_id']}</td>
+                                        <td>{$row['warehouse_name']}</td>
+                                        <td>{$row['address']}</td>
+                                        <td>{$row['contact_person']}</td>
+                                        <td>{$row['contact_phone']}</td>
+                                        <td>
+                                            <div class='action-buttons'>
+                                                <button class='btn btn-edit' onclick='editWarehouse({$row['warehouse_id']})' 
+                                                    data-id='{$row['warehouse_id']}' 
+                                                    data-name='{$row['warehouse_name']}'
+                                                    data-address='{$row['address']}'
+                                                    data-contact='{$row['contact_person']}'
+                                                    data-phone='{$row['contact_phone']}'>
+                                                    <i class='fas fa-edit'></i>
+                                                </button>
+                                                <button class='btn btn-delete' onclick='confirmDelete({$row['warehouse_id']}, \"warehouse\")'>
+                                                    <i class='fas fa-trash-alt'></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                      </tr>";
                             }
-                            ?>
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Modal thêm khu vực -->
-                <div class="modal fade" id="addZoneModal" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Thêm khu vực mới</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body">
-                                <form method="post" id="addZoneForm">
-                                    <div class="form-group mb-3">
-                                        <label for="warehouse_id">Chọn kho <span class="text-danger">*</span></label>
-                                        <select class="form-select" id="warehouse_id" name="warehouse_id" required>
-                                            <option value="">-- Chọn kho --</option>
-                                            <?php
-                                            $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
-                                            $warehouse_result = $conn->query($warehouse_sql);
-                                            
-                                            if ($warehouse_result->num_rows > 0) {
-                                                while ($warehouse = $warehouse_result->fetch_assoc()) {
-                                                    echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
-                                                }
-                                            }
-                                            ?>
-                                        </select>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="zone_code">Mã khu vực <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" id="zone_code" name="zone_code" placeholder="VD: A, B, C..." required>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="zone_name">Tên khu vực</label>
-                                        <input type="text" class="form-control" id="zone_name" name="zone_name" placeholder="VD: Khu vực hàng điện tử">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="description">Mô tả</label>
-                                        <textarea class="form-control" id="description" name="description" rows="2"></textarea>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                                        <button type="submit" name="add_zone" class="btn btn-primary">Thêm mới</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Modal sửa khu vực -->
-                <div class="modal fade" id="editZoneModal" tabindex="-1" aria-hidden="true">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Sửa thông tin khu vực</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body">
-                                <form method="post" id="editZoneForm">
-                                    <input type="hidden" id="edit_zone_id" name="zone_id">
-                                    <div class="form-group mb-3">
-                                        <label for="edit_zone_code">Mã khu vực <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" id="edit_zone_code" name="zone_code" required>
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="edit_zone_name">Tên khu vực</label>
-                                        <input type="text" class="form-control" id="edit_zone_name" name="zone_name">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="edit_description">Mô tả</label>
-                                        <textarea class="form-control" id="edit_description" name="description" rows="2"></textarea>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                                        <button type="submit" name="update_zone" class="btn btn-primary">Cập nhật</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-        <?php elseif ($tab == 'ke'): ?>
-            <!-- Tab Kệ kho -->
-            <div class="tab-pane active">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h5>Danh sách kệ kho</h5>
-                    <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addShelfModal">
-                        <i class="fas fa-plus-circle me-2"></i>Thêm kệ mới
-                    </button>
-                </div>
-                
-                <div class="table-responsive">
-                    <table class="data-table table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th width="5%">ID</th>
-                                <th width="10%">Mã kệ</th>
-                                <th width="15%">Vị trí</th>
-                <th width="10%">Sức chứa tối đa</th>
-                <th width="10%">Đơn vị</th>
-                <th width="20%">Khu vực</th>
-                <th width="15%">Trạng thái</th>
-                <th width="15%">Thao tác</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php
-            $sql = "SELECT s.*, wz.zone_code, wz.zone_name, w.warehouse_name
-                    FROM shelves s
-                    JOIN warehouse_zones wz ON s.zone_id = wz.zone_id
-                    JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
-                    ORDER BY s.shelf_id DESC";
-            $result = $conn->query($sql);
-            
-            if ($result->num_rows > 0) {
-                while ($row = $result->fetch_assoc()) {
-                    $status_class = '';
-                    switch ($row['status']) {
-                        case 'ACTIVE':
-                            $status_class = 'status-active';
-                            $status_text = 'Hoạt động';
-                            break;
-                        case 'INACTIVE':
-                            $status_class = 'status-inactive';
-                            $status_text = 'Không hoạt động';
-                            break;
-                        case 'MAINTENANCE':
-                            $status_class = 'status-maintenance';
-                            $status_text = 'Bảo trì';
-                            break;
-                    }
-                    
-                    echo "<tr>
-                            <td>{$row['shelf_id']}</td>
-                            <td>{$row['shelf_code']}</td>
-                            <td>{$row['position']}</td>
-                            <td>{$row['max_capacity']}</td>
-                            <td>" . ($row['capacity_unit'] == 'VOLUME' ? 'Thể tích' : 'Số lượng') . "</td>
-                            <td>{$row['zone_code']} - {$row['zone_name']} ({$row['warehouse_name']})</td>
-                            <td><span class='status-badge $status_class'>$status_text</span></td>
-                            <td>
-                                <div class='action-buttons'>
-                                    <button class='btn btn-edit' onclick='editShelf({$row['shelf_id']})' 
-                                        data-id='{$row['shelf_id']}'
-                                        data-code='{$row['shelf_code']}'
-                                        data-position='{$row['position']}'
-                                        data-max-capacity='{$row['max_capacity']}'
-                                        data-capacity-unit='{$row['capacity_unit']}'
-                                        data-description='{$row['description']}'
-                                        data-status='{$row['status']}'>
-                                        <i class='fas fa-edit'></i>
-                                    </button>
-                                    <button class='btn btn-delete' onclick='confirmDelete({$row['shelf_id']}, \"shelf\")'>
-                                        <i class='fas fa-trash-alt'></i>
-                                    </button>
-                                </div>
-                            </td>
-                          </tr>";
-                }
-            } else {
-                echo "<tr><td colspan='8' class='text-center'>Không có dữ liệu kệ kho</td></tr>";
-            }
-            ?>
-        </tbody>
-    </table>
-</div>
-
-<!-- Modal thêm kệ -->
-<div class="modal fade" id="addShelfModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Thêm kệ mới</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <form method="post" id="addShelfForm">
-                    <div class="form-group mb-3">
-                        <label for="zone_id">Chọn khu vực <span class="text-danger">*</span></label>
-                        <select class="form-select" id="zone_id" name="zone_id" required>
-                            <option value="">-- Chọn khu vực --</option>
-                            <?php
-                            $zone_sql = "SELECT wz.*, w.warehouse_name 
-                                        FROM warehouse_zones wz
-                                        JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
-                                        ORDER BY w.warehouse_name, wz.zone_code";
-                            $zone_result = $conn->query($zone_sql);
-                            
-                            if ($zone_result->num_rows > 0) {
-                                while ($zone = $zone_result->fetch_assoc()) {
-                                    echo "<option value='{$zone['zone_id']}'>{$zone['zone_code']} - {$zone['zone_name']} ({$zone['warehouse_name']})</option>";
-                                }
-                            }
-                            ?>
-                        </select>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="shelf_code">Mã kệ <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="shelf_code" name="shelf_code" placeholder="VD: A1, B2, C3..." required>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="position">Vị trí</label>
-                        <input type="text" class="form-control" id="position" name="position" placeholder="VD: Hàng 1, Cột 2">
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="max_capacity">Sức chứa tối đa <span class="text-danger">*</span></label>
-                        <input type="number" step="0.01" class="form-control" id="max_capacity" name="max_capacity" required>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="capacity_unit">Đơn vị sức chứa</label>
-                        <select class="form-select" id="capacity_unit" name="capacity_unit">
-                            <option value="VOLUME">Thể tích (dm³)</option>
-                            <option value="QUANTITY">Số lượng (cái)</option>
-                        </select>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="description">Mô tả</label>
-                        <textarea class="form-control" id="description" name="description" rows="2"></textarea>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="status">Trạng thái</label>
-                        <select class="form-select" id="status" name="status">
-                            <option value="ACTIVE">Hoạt động</option>
-                            <option value="INACTIVE">Không hoạt động</option>
-                            <option value="MAINTENANCE">Bảo trì</option>
-                        </select>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                        <button type="submit" name="add_shelf" class="btn btn-primary">Thêm mới</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal sửa kệ -->
-<div class="modal fade" id="editShelfModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Sửa thông tin kệ</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <form method="post" id="editShelfForm">
-                    <input type="hidden" id="edit_shelf_id" name="shelf_id">
-                    <div class="form-group mb-3">
-                        <label for="edit_shelf_code">Mã kệ <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="edit_shelf_code" name="shelf_code" required>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="edit_position">Vị trí</label>
-                        <input type="text" class="form-control" id="edit_position" name="position">
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="edit_max_capacity">Sức chứa tối đa <span class="text-danger">*</span></label>
-                        <input type="number" step="0.01" class="form-control" id="edit_max_capacity" name="max_capacity" required>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="edit_capacity_unit">Đơn vị sức chứa</label>
-                        <select class="form-select" id="edit_capacity_unit" name="capacity_unit">
-                            <option value="VOLUME">Thể tích (dm³)</option>
-                            <option value="QUANTITY">Số lượng (cái)</option>
-                        </select>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="edit_description">Mô tả</label>
-                        <textarea class="form-control" id="edit_description" name="description" rows="2"></textarea>
-                    </div>
-                    <div class="form-group mb-3">
-                        <label for="edit_status">Trạng thái</label>
-                        <select class="form-select" id="edit_status" name="status">
-                            <option value="ACTIVE">Hoạt động</option>
-                            <option value="INACTIVE">Không hoạt động</option>
-                            <option value="MAINTENANCE">Bảo trì</option>
-                        </select>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                        <button type="submit" name="update_shelf" class="btn btn-primary">Cập nhật</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-</div>
-
-<?php elseif ($tab == 'vi_tri'): ?>
-<!-- Tab Vị trí sản phẩm -->
-<div class="tab-pane active">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h5>Danh sách vị trí sản phẩm</h5>
-        <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addLocationModal">
-            <i class="fas fa-plus-circle me-2"></i>Thêm vị trí mới
-        </button>
-    </div>
-    
-    <div class="table-responsive">
-        <table class="data-table table table-striped table-hover">
-            <thead>
-                <tr>
-                    <th width="5%">ID</th>
-                    <th width="15%">Sản phẩm</th>
-                    <th width="10%">Mã lô</th>
-                    <th width="10%">Hạn sử dụng</th>
-                    <th width="10%">Số lượng</th>
-                    <th width="15%">Kệ</th>
-                    <th width="15%">Khu vực - Kho</th>
-                    <th width="10%">Ngày nhập</th>
-                    <th width="10%">Thao tác</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php
-                $sql = "SELECT pl.*, p.product_name, p.product_code, s.shelf_code, 
-                        wz.zone_code, wz.zone_name, w.warehouse_name
-                        FROM product_locations pl
-                        JOIN products p ON pl.product_id = p.product_id
-                        JOIN shelves s ON pl.shelf_id = s.shelf_id
-                        JOIN warehouse_zones wz ON s.zone_id = wz.zone_id
-                        JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
-                        ORDER BY pl.entry_date DESC";
-                $result = $conn->query($sql);
-                
-                if ($result->num_rows > 0) {
-                    while ($row = $result->fetch_assoc()) {
-                        echo "<tr>
-                                <td>{$row['location_id']}</td>
-                                <td>{$row['product_code']} - {$row['product_name']}</td>
-                                <td>{$row['batch_number']}</td>
-                                <td>" . ($row['expiry_date'] ? date('d/m/Y', strtotime($row['expiry_date'])) : 'N/A') . "</td>
-                                <td>{$row['quantity']}</td>
-                                <td>{$row['shelf_code']}</td>
-                                <td>{$row['zone_code']} - {$row['warehouse_name']}</td>
-                                <td>" . date('d/m/Y', strtotime($row['entry_date'])) . "</td>
-                                <td>
-                                    <div class='action-buttons'>
-                                        <button class='btn btn-edit' onclick='editLocation({$row['location_id']})' 
-                                            data-id='{$row['location_id']}'
-                                            data-batch='{$row['batch_number']}'
-                                            data-expiry='" . ($row['expiry_date'] ? $row['expiry_date'] : '') . "'
-                                            data-quantity='{$row['quantity']}'>
-                                            <i class='fas fa-edit'></i>
-                                        </button>
-                                        <button class='btn btn-delete' onclick='confirmDelete({$row['location_id']}, \"location\")'>
-                                            <i class='fas fa-trash-alt'></i>
-                                        </button>
-                                    </div>
-                                </td>
-                              </tr>";
-                    }
-                } else {
-                    echo "<tr><td colspan='9' class='text-center'>Không có dữ liệu vị trí sản phẩm</td></tr>";
-                }
-                ?>
-            </tbody>
-        </table>
-    </div>
-    
-    <!-- Modal thêm vị trí sản phẩm -->
-    <div class="modal fade" id="addLocationModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Thêm vị trí sản phẩm mới</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form method="post" id="addLocationForm">
-                        <div class="form-group mb-3">
-                            <label for="warehouse_selector">Chọn kho <span class="text-danger">*</span></label>
-                            <select class="form-select" id="warehouse_selector" required>
-                                <option value="">-- Chọn kho --</option>
-                                <?php
-                                $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
-                                $warehouse_result = $conn->query($warehouse_sql);
-                                
-                                if ($warehouse_result->num_rows > 0) {
-                                    while ($warehouse = $warehouse_result->fetch_assoc()) {
-                                        echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
-                                    }
-                                }
-                                ?>
-                            </select>
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="zone_selector">Chọn khu vực <span class="text-danger">*</span></label>
-                            <select class="form-select" id="zone_selector" disabled>
-                                <option value="">-- Chọn khu vực --</option>
-                            </select>
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="shelf_id">Chọn kệ <span class="text-danger">*</span></label>
-                            <select class="form-select" id="shelf_id" name="shelf_id" required disabled>
-                                <option value="">-- Chọn kệ --</option>
-                            </select>
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="product_id">Chọn sản phẩm <span class="text-danger">*</span></label>
-                            <select class="form-select" id="product_id" name="product_id" required>
-                                <option value="">-- Chọn sản phẩm --</option>
-                                <?php
-                                $product_sql = "SELECT * FROM products ORDER BY product_name";
-                                $product_result = $conn->query($product_sql);
-                                
-                                if ($product_result->num_rows > 0) {
-                                    while ($product = $product_result->fetch_assoc()) {
-                                        echo "<option value='{$product['product_id']}'>{$product['product_code']} - {$product['product_name']}</option>";
-                                    }
-                                }
-                                ?>
-                            </select>
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="quantity">Số lượng <span class="text-danger">*</span></label>
-                            <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="batch_number">Mã lô</label>
-                            <input type="text" class="form-control" id="batch_number" name="batch_number">
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="expiry_date">Hạn sử dụng</label>
-                            <input type="date" class="form-control" id="expiry_date" name="expiry_date">
-                        </div>
-                        <div id="suggestion_container" class="mb-3 d-none">
-                            <div class="alert alert-info">
-                                <h6 class="alert-heading">Gợi ý vị trí kệ phù hợp:</h6>
-                                <div id="suggestion_content"></div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-info" id="suggestButton">Gợi ý vị trí</button>
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                            <button type="submit" name="add_location" class="btn btn-primary">Thêm mới</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal sửa vị trí sản phẩm -->
-    <div class="modal fade" id="editLocationModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Sửa thông tin vị trí sản phẩm</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form method="post" id="editLocationForm">
-                        <input type="hidden" id="edit_location_id" name="location_id">
-                        <div class="form-group mb-3">
-                            <label for="edit_batch_number">Mã lô</label>
-                            <input type="text" class="form-control" id="edit_batch_number" name="batch_number">
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="edit_expiry_date">Hạn sử dụng</label>
-                            <input type="date" class="form-control" id="edit_expiry_date" name="expiry_date">
-                        </div>
-                        <div class="form-group mb-3">
-                            <label for="edit_quantity">Số lượng <span class="text-danger">*</span></label>
-                            <input type="number" class="form-control" id="edit_quantity" name="quantity" min="1" required>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                            <button type="submit" name="update_location" class="btn btn-primary">Cập nhật</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<?php elseif ($tab == 'bao_cao'): ?>
-<!-- Tab Báo cáo kho -->
-<div class="tab-pane active">
-    <div class="row">
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Báo cáo tồn kho theo kho</h5>
-                </div>
-                <div class="card-body">
-                    <form id="inventoryReportForm" class="mb-3">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="report_warehouse">Chọn kho</label>
-                                    <select class="form-select" id="report_warehouse">
-                                        <option value="">Tất cả các kho</option>
-                                        <?php
-                                        $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
-                                        $warehouse_result = $conn->query($warehouse_sql);
-                                        
-                                        if ($warehouse_result->num_rows > 0) {
-                                            while ($warehouse = $warehouse_result->fetch_assoc()) {
-                                                echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
-                                            }
-                                        }
-                                        ?>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="stock_level">Mức tồn kho</label>
-                                    <select class="form-select" id="stock_level">
-                                        <option value="">Tất cả</option>
-                                        <option value="Thấp">Thấp</option>
-                                        <option value="Trung bình">Trung bình</option>
-                                        <option value="Cao">Cao</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        <button type="button" id="generateInventoryReport" class="btn btn-primary mt-3">
-                            <i class="fas fa-chart-bar me-2"></i>Tạo báo cáo
-                        </button>
-                    </form>
-                    <div id="inventoryReportResult"></div>
-                </div>
+                        } else {
+                            echo "<tr><td colspan='6' class='text-center'>Không có dữ liệu kho hàng</td></tr>";
+                        }
+                        ?>
+                    </tbody>
+                </table>
             </div>
         </div>
         
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Báo cáo kệ và mức độ sử dụng</h5>
-                </div>
-                <div class="card-body">
-                    <form id="shelfUtilizationForm" class="mb-3">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="report_shelf_warehouse">Chọn kho</label>
-                                    <select class="form-select" id="report_shelf_warehouse">
-                                        <option value="">Tất cả các kho</option>
-                                        <?php
-                                        $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
-                                        $warehouse_result = $conn->query($warehouse_sql);
-                                        
-                                        if ($warehouse_result->num_rows > 0) {
-                                            while ($warehouse = $warehouse_result->fetch_assoc()) {
-                                                echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
-                                            }
-                                        }
-                                        ?>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="utilization_level">Mức sử dụng</label>
-                                    <select class="form-select" id="utilization_level">
-                                        <option value="">Tất cả</option>
-                                        <option value="Thấp">Thấp (< 30%)</option>
-                                        <option value="Trung bình">Trung bình (30-70%)</option>
-                                        <option value="Cao">Cao (> 70%)</option>
-                                    </select>
-                                </div>
-                            </div>
+        <!-- Tab Khu vực kho -->
+        <div class="tab-pane fade <?php echo ($tab == 'khu_vuc') ? 'show active' : ''; ?>" id="khu_vuc" role="tabpanel" aria-labelledby="zone-tab">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5>Danh sách khu vực kho</h5>
+                <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addZoneModal">
+                    <i class="fas fa-plus-circle me-2"></i>Thêm khu vực mới
+                </button>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="data-table table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th width="5%">ID</th>
+                            <th width="15%">Mã khu vực</th>
+                            <th width="20%">Tên khu vực</th>
+                            <th width="25%">Kho</th>
+                            <th width="25%">Mô tả</th>
+                            <th width="10%">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $sql = "SELECT wz.*, w.warehouse_name 
+                                FROM warehouse_zones wz
+                                JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
+                                ORDER BY wz.zone_id DESC";
+                        $result = $conn->query($sql);
+                        
+                        if ($result->num_rows > 0) {
+                            while ($row = $result->fetch_assoc()) {
+                                echo "<tr>
+                                        <td>{$row['zone_id']}</td>
+                                        <td>{$row['zone_code']}</td>
+                                        <td>{$row['zone_name']}</td>
+                                        <td>{$row['warehouse_name']}</td>
+                                        <td>{$row['description']}</td>
+                                        <td>
+                                            <div class='action-buttons'>
+                                                <button class='btn btn-edit' onclick='editZone({$row['zone_id']})' 
+                                                    data-id='{$row['zone_id']}' 
+                                                    data-code='{$row['zone_code']}'
+                                                    data-name='{$row['zone_name']}'
+                                                    data-description='{$row['description']}'>
+                                                    <i class='fas fa-edit'></i>
+                                                </button>
+                                                <button class='btn btn-delete' onclick='confirmDelete({$row['zone_id']}, \"zone\")'>
+                                                    <i class='fas fa-trash-alt'></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                      </tr>";
+                            }
+                        } else {
+                            echo "<tr><td colspan='6' class='text-center'>Không có dữ liệu khu vực kho</td></tr>";
+                        }
+                        ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Tab Kệ kho -->
+        <div class="tab-pane fade <?php echo ($tab == 'ke') ? 'show active' : ''; ?>" id="ke" role="tabpanel" aria-labelledby="shelf-tab">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5>Danh sách kệ kho</h5>
+                <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addShelfModal">
+                    <i class="fas fa-plus-circle me-2"></i>Thêm kệ mới
+                </button>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="data-table table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th width="5%">ID</th>
+                            <th width="10%">Mã kệ</th>
+                            <th width="15%">Vị trí</th>
+                            <th width="10%">Sức chứa tối đa</th>
+                            <th width="10%">Đơn vị</th>
+                            <th width="20%">Khu vực</th>
+                            <th width="15%">Trạng thái</th>
+                            <th width="15%">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $sql = "SELECT s.*, wz.zone_code, wz.zone_name, w.warehouse_name
+                                FROM shelves s
+                                JOIN warehouse_zones wz ON s.zone_id = wz.zone_id
+                                JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
+                                ORDER BY s.shelf_id DESC";
+                        $result = $conn->query($sql);
+                        
+                        if ($result->num_rows > 0) {
+                            while ($row = $result->fetch_assoc()) {
+                                $status_class = '';
+                                switch ($row['status']) {
+                                    case 'ACTIVE':
+                                        $status_class = 'status-active';
+                                        $status_text = 'Hoạt động';
+                                        break;
+                                    case 'INACTIVE':
+                                        $status_class = 'status-inactive';
+                                        $status_text = 'Không hoạt động';
+                                        break;
+                                    case 'MAINTENANCE':
+                                        $status_class = 'status-maintenance';
+                                        $status_text = 'Bảo trì';
+                                        break;
+                                }
+                                
+                                echo "<tr>
+                                        <td>{$row['shelf_id']}</td>
+                                        <td>{$row['shelf_code']}</td>
+                                        <td>{$row['position']}</td>
+                                        <td>{$row['max_capacity']}</td>
+                                        <td>" . ($row['capacity_unit'] == 'VOLUME' ? 'Thể tích' : 'Số lượng') . "</td>
+                                        <td>{$row['zone_code']} - {$row['zone_name']} ({$row['warehouse_name']})</td>
+                                        <td><span class='status-badge $status_class'>$status_text</span></td>
+                                        <td>
+                                            <div class='action-buttons'>
+                                                <button class='btn btn-edit' onclick='editShelf({$row['shelf_id']})' 
+                                                    data-id='{$row['shelf_id']}'
+                                                    data-code='{$row['shelf_code']}'
+                                                    data-position='{$row['position']}'
+                                                    data-max-capacity='{$row['max_capacity']}'
+                                                    data-capacity-unit='{$row['capacity_unit']}'
+                                                    data-description='{$row['description']}'
+                                                    data-status='{$row['status']}'>
+                                                    <i class='fas fa-edit'></i>
+                                                </button>
+                                                <button class='btn btn-delete' onclick='confirmDelete({$row['shelf_id']}, \"shelf\")'>
+                                                    <i class='fas fa-trash-alt'></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                      </tr>";
+                            }
+                        } else {
+                            echo "<tr><td colspan='8' class='text-center'>Không có dữ liệu kệ kho</td></tr>";
+                        }
+                        ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Tab Vị trí sản phẩm -->
+        <div class="tab-pane fade <?php echo ($tab == 'vi_tri') ? 'show active' : ''; ?>" id="vi_tri" role="tabpanel" aria-labelledby="location-tab">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5>Danh sách vị trí sản phẩm</h5>
+                <button type="button" class="btn btn-add" data-bs-toggle="modal" data-bs-target="#addLocationModal">
+                    <i class="fas fa-plus-circle me-2"></i>Thêm vị trí mới
+                </button>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="data-table table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th width="5%">ID</th>
+                            <th width="15%">Sản phẩm</th>
+                            <th width="10%">Mã lô</th>
+                            <th width="10%">Hạn sử dụng</th>
+                            <th width="10%">Số lượng</th>
+                            <th width="15%">Kệ</th>
+                            <th width="15%">Khu vực - Kho</th>
+                            <th width="10%">Ngày nhập</th>
+                            <th width="10%">Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $sql = "SELECT pl.*, p.product_name, p.product_code, s.shelf_code, 
+                                wz.zone_code, wz.zone_name, w.warehouse_name
+                                FROM product_locations pl
+                                JOIN products p ON pl.product_id = p.product_id
+                                JOIN shelves s ON pl.shelf_id = s.shelf_id
+                                JOIN warehouse_zones wz ON s.zone_id = wz.zone_id
+                                JOIN warehouses w ON wz.warehouse_id = w.warehouse_id
+                                ORDER BY pl.entry_date DESC";
+                        $result = $conn->query($sql);
+                        
+                        if ($result->num_rows > 0) {
+                            while ($row = $result->fetch_assoc()) {
+                                echo "<tr>
+                                        <td>{$row['location_id']}</td>
+                                        <td>{$row['product_code']} - {$row['product_name']}</td>
+                                        <td>{$row['batch_number']}</td>
+                                        <td>" . ($row['expiry_date'] ? date('d/m/Y', strtotime($row['expiry_date'])) : 'N/A') . "</td>
+                                        <td>{$row['quantity']}</td>
+                                        <td>{$row['shelf_code']}</td>
+                                        <td>{$row['zone_code']} - {$row['warehouse_name']}</td>
+                                        <td>" . date('d/m/Y', strtotime($row['entry_date'])) . "</td>
+                                        <td>
+                                            <div class='action-buttons'>
+                                                <button class='btn btn-edit' onclick='editLocation({$row['location_id']})' 
+                                                    data-id='{$row['location_id']}'
+                                                    data-batch='{$row['batch_number']}'
+                                                    data-expiry='" . ($row['expiry_date'] ? $row['expiry_date'] : '') . "'
+                                                    data-quantity='{$row['quantity']}'>
+                                                    <i class='fas fa-edit'></i>
+                                                </button>
+                                                <button class='btn btn-delete' onclick='confirmDelete({$row['location_id']}, \"location\")'>
+                                                    <i class='fas fa-trash-alt'></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                      </tr>";
+                            }
+                        } else {
+                            echo "<tr><td colspan='9' class='text-center'>Không có dữ liệu vị trí sản phẩm</td></tr>";
+                        }
+                        ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Tab Báo cáo kho -->
+        <div class="tab-pane fade <?php echo ($tab == 'bao_cao') ? 'show active' : ''; ?>" id="bao_cao" role="tabpanel" aria-labelledby="report-tab">
+            <div class="row">
+                <div class="col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Báo cáo tồn kho theo kho</h5>
                         </div>
-                        <button type="button" id="generateShelfReport" class="btn btn-primary mt-3">
-                            <i class="fas fa-chart-bar me-2"></i>Tạo báo cáo
-                        </button>
-                    </form>
-                    <div id="shelfReportResult"></div>
+                        <div class="card-body">
+                            <form id="inventoryReportForm" class="mb-3">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="report_warehouse">Chọn kho</label>
+                                            <select class="form-select" id="report_warehouse">
+                                                <option value="">Tất cả các kho</option>
+                                                <?php
+                                                $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
+                                                $warehouse_result = $conn->query($warehouse_sql);
+                                                
+                                                if ($warehouse_result->num_rows > 0) {
+                                                    while ($warehouse = $warehouse_result->fetch_assoc()) {
+                                                        echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
+                                                    }
+                                                }
+                                                ?>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="stock_level">Mức tồn kho</label>
+                                            <select class="form-select" id="stock_level">
+                                                <option value="">Tất cả</option>
+                                                <option value="Thấp">Thấp</option>
+                                                <option value="Trung bình">Trung bình</option>
+                                                <option value="Cao">Cao</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="button" id="generateInventoryReport" class="btn btn-primary mt-3">
+                                    <i class="fas fa-chart-bar me-2"></i>Tạo báo cáo
+                                </button>
+                            </form>
+                            <div id="inventoryReportResult"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Báo cáo kệ và mức độ sử dụng</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="shelfUtilizationForm" class="mb-3">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="report_shelf_warehouse">Chọn kho</label>
+                                            <select class="form-select" id="report_shelf_warehouse">
+                                                <option value="">Tất cả các kho</option>
+                                                <?php
+                                                $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
+                                                $warehouse_result = $conn->query($warehouse_sql);
+                                                
+                                                if ($warehouse_result->num_rows > 0) {
+                                                    while ($warehouse = $warehouse_result->fetch_assoc()) {
+                                                        echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
+                                                    }
+                                                }
+                                                ?>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="utilization_level">Mức sử dụng</label>
+                                            <select class="form-select" id="utilization_level">
+                                                <option value="">Tất cả</option>
+                                                <option value="Thấp">Thấp (< 30%)</option>
+                                                <option value="Trung bình">Trung bình (30-70%)</option>
+                                                <option value="Cao">Cao (> 70%)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="button" id="generateShelfReport" class="btn btn-primary mt-3">
+                                    <i class="fas fa-chart-bar me-2"></i>Tạo báo cáo
+                                </button>
+                            </form>
+                            <div id="shelfReportResult"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-12 mb-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Sản phẩm sắp hết hạn</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="expiryReportForm" class="mb-3">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="days_threshold">Ngưỡng ngày sắp hết hạn</label>
+                                            <select class="form-select" id="days_threshold">
+                                                <option value="7">7 ngày</option>
+                                                <option value="15">15 ngày</option>
+                                                <option value="30" selected>30 ngày</option>
+                                                <option value="60">60 ngày</option>
+                                                <option value="90">90 ngày</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="expiry_warehouse">Chọn kho</label>
+                                            <select class="form-select" id="expiry_warehouse">
+                                                <option value="">Tất cả các kho</option>
+                                                <?php
+                                                $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
+                                                $warehouse_result = $conn->query($warehouse_sql);
+                                                
+                                                if ($warehouse_result->num_rows > 0) {
+                                                    while ($warehouse = $warehouse_result->fetch_assoc()) {
+                                                        echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
+                                                    }
+                                                }
+                                                ?>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="button" id="generateExpiryReport" class="btn btn-primary mt-3">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>Tạo báo cáo
+                                </button>
+                            </form>
+                            <div id="expiryReportResult"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <div class="row">
-        <div class="col-md-12 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">Sản phẩm sắp hết hạn</h5>
-                </div>
-                <div class="card-body">
-                    <form id="expiryReportForm" class="mb-3">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="days_threshold">Ngưỡng ngày sắp hết hạn</label>
-                                    <select class="form-select" id="days_threshold">
-                                        <option value="7">7 ngày</option>
-                                        <option value="15">15 ngày</option>
-                                        <option value="30" selected>30 ngày</option>
-                                        <option value="60">60 ngày</option>
-                                        <option value="90">90 ngày</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="expiry_warehouse">Chọn kho</label>
-                                    <select class="form-select" id="expiry_warehouse">
-                                        <option value="">Tất cả các kho</option>
-                                        <?php
-                                        $warehouse_sql = "SELECT * FROM warehouses ORDER BY warehouse_name";
-                                        $warehouse_result = $conn->query($warehouse_sql);
-                                        
-                                        if ($warehouse_result->num_rows > 0) {
-                                            while ($warehouse = $warehouse_result->fetch_assoc()) {
-                                                echo "<option value='{$warehouse['warehouse_id']}'>{$warehouse['warehouse_name']}</option>";
-                                            }
-                                        }
-                                        ?>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        <button type="button" id="generateExpiryReport" class="btn btn-primary mt-3">
-                            <i class="fas fa-exclamation-triangle me-2"></i>Tạo báo cáo
-                        </button>
-                    </form>
-                    <div id="expiryReportResult"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
-</div>
 </div>
 
 <!-- Modal xác nhận xóa -->
@@ -1342,7 +954,7 @@ document.getElementById('warehouse_selector')?.addEventListener('change', functi
     
     if (warehouseId) {
         // Gọi AJAX để lấy danh sách khu vực
-        fetch(`ajax/get_zones.php?warehouse_id=${warehouseId}`)
+        fetch(`ajax/thongtin/layKhuVuc.php?warehouse_id=${warehouseId}`)
             .then(response => response.json())
             .then(data => {
                 if (data.length > 0) {
@@ -1369,7 +981,7 @@ document.getElementById('zone_selector')?.addEventListener('change', function() 
     
     if (zoneId) {
         // Gọi AJAX để lấy danh sách kệ
-        fetch(`ajax/get_shelves.php?zone_id=${zoneId}`)
+        fetch(`ajax/thongtin/layKe.php?zone_id=${zoneId}`)
             .then(response => response.json())
             .then(data => {
                 if (data.length > 0) {
@@ -1398,7 +1010,7 @@ document.getElementById('suggestButton')?.addEventListener('click', function() {
     }
     
     // Gọi AJAX để lấy gợi ý vị trí
-    fetch(`ajax/suggest_location.php?product_id=${productId}&warehouse_id=${warehouseId}&quantity=${quantity}`)
+    fetch(`ajax/thongtin/deXuatViTri.php?product_id=${productId}&warehouse_id=${warehouseId}&quantity=${quantity}`)
         .then(response => response.json())
         .then(data => {
             const suggestionContainer = document.getElementById('suggestion_container');
@@ -1440,7 +1052,7 @@ document.getElementById('generateInventoryReport')?.addEventListener('click', fu
     const stockLevel = document.getElementById('stock_level').value;
     
     // Gọi AJAX để lấy báo cáo tồn kho
-    fetch(`ajax/inventory_report.php?warehouse_id=${warehouseId}&stock_level=${stockLevel}`)
+    fetch(`ajax/baocao/baoCaoTonKho.php?warehouse_id=${warehouseId}&stock_level=${stockLevel}`)
         .then(response => response.json())
         .then(data => {
             const reportContainer = document.getElementById('inventoryReportResult');
@@ -1506,7 +1118,7 @@ document.getElementById('generateShelfReport')?.addEventListener('click', functi
     const utilizationLevel = document.getElementById('utilization_level').value;
     
     // Gọi AJAX để lấy báo cáo kệ
-    fetch(`ajax/shelf_report.php?warehouse_id=${warehouseId}&utilization_level=${utilizationLevel}`)
+    fetch(`ajax/baocao/baoCaoKe.php?warehouse_id=${warehouseId}&utilization_level=${utilizationLevel}`)
         .then(response => response.json())
         .then(data => {
             const reportContainer = document.getElementById('shelfReportResult');
@@ -1580,7 +1192,7 @@ document.getElementById('generateExpiryReport')?.addEventListener('click', funct
     const warehouseId = document.getElementById('expiry_warehouse').value;
     
     // Gọi AJAX để lấy báo cáo sản phẩm sắp hết hạn
-    fetch(`ajax/expiry_report.php?days_threshold=${daysThreshold}&warehouse_id=${warehouseId}`)
+    fetch(`ajax/baocao/baoCaoHetHan.php?days_threshold=${daysThreshold}&warehouse_id=${warehouseId}`)
         .then(response => response.json())
         .then(data => {
             const reportContainer = document.getElementById('expiryReportResult');
@@ -1656,6 +1268,36 @@ function exportTableToExcel(tableId, filename = '') {
     
     XLSX.writeFile(wb, filename);
 }
+
+// JavaScript xử lý chuyển đổi tab
+document.addEventListener('DOMContentLoaded', function() {
+    // Xử lý chuyển tab
+    const warehouseTabs = document.querySelectorAll('#warehouseTabs .nav-link');
+    warehouseTabs.forEach(tab => {
+        tab.addEventListener('click', function(e) {
+            // Lấy tab được chọn
+            const tabId = this.getAttribute('data-bs-target').substring(1);
+            
+            // Cập nhật URL với history API mà không reload trang
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('tab', tabId);
+            const newUrl = window.location.pathname + '?' + urlParams.toString();
+            history.pushState({ tab: tabId }, '', newUrl);
+        });
+    });
+    
+    // Xử lý sự kiện popstate khi người dùng sử dụng nút back/forward trên trình duyệt
+    window.addEventListener('popstate', function(event) {
+        if (event.state && event.state.tab) {
+            // Kích hoạt tab tương ứng
+            const tabToActivate = document.querySelector(`#warehouseTabs .nav-link[data-bs-target="#${event.state.tab}"]`);
+            if (tabToActivate) {
+                const tab = new bootstrap.Tab(tabToActivate);
+                tab.show();
+            }
+        }
+    });
+});
 </script>
 
 <!-- Thêm thư viện SheetJS để xuất Excel -->

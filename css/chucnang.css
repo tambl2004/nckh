@@ -83,7 +83,7 @@
 }
 
 .data-table td {
-    padding: 6px;
+    padding: 12px 15px;
     border-bottom: 1px solid #e9ecef;
     vertical-align: middle;
 }
@@ -124,14 +124,17 @@
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
+    overflow-y: auto;
 }
 
 .custom-modal.show {
     opacity: 1;
     visibility: visible;
+  
 }
 
 .modal-content {
+
     background-color: white;
     border-radius: 15px;
     box-shadow: 0 15px 30px rgba(0,0,0,0.2);
@@ -332,7 +335,36 @@
     display: block;
 }
 
+/* CSS cập nhật cho phần preview hình ảnh */
+.image-preview-container {
+    cursor: pointer;
+    overflow: hidden;
+}
 
+.image-preview-container:hover::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+}
+
+.image-preview-container:active {
+    transform: scale(0.98);
+}
+
+#preview_placeholder, #edit_preview_placeholder {
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+
+.image-preview.has-image + #preview_placeholder,
+.image-preview.has-image + #edit_preview_placeholder {
+    display: none;
+}
 
 /* Styling cho dòng chưa đọc */
 .unread-contact {
@@ -574,3 +606,128 @@
     font-weight: 500;
 }
 
+/* CSS cập nhật cho badge trạng thái tồn kho */
+.badge {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-weight: 500;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bg-success {
+    background-color: #1cc88a !important;
+}
+
+.bg-warning {
+    background-color: #f6c23e !important;
+}
+
+.bg-danger {
+    background-color: #e74a3b !important;
+}
+
+/* CSS cho bảng sản phẩm gần hết hạn và tồn kho thấp */
+.table-sm {
+    font-size: 0.9rem;
+}
+
+.table-sm th {
+    font-weight: 600;
+    padding: 10px;
+    background-color: #f8f9fa;
+}
+
+.table-sm td {
+    padding: 8px 10px;
+}
+
+/* Responsive fixes */
+@media (max-width: 768px) {
+    .data-table {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .data-table th, 
+    .data-table td {
+        white-space: nowrap;
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+}
+
+/* Bổ sung vào chucnang.css */
+
+/* Style cho danh mục đa cấp */
+.form-group select option {
+    padding-left: 10px;
+}
+
+.form-group select option[data-level="1"] {
+    padding-left: 30px;
+}
+
+/* Style cho bảng sản phẩm */
+.data-table img {
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.data-table img:hover {
+    transform: scale(1.5);
+}
+
+/* Style cho badge tồn kho */
+.badge.bg-low-stock {
+    background-color: #f6c23e !important;
+    color: #fff;
+}
+
+.badge.bg-normal-stock {
+    background-color: #1cc88a !important;
+    color: #fff;
+}
+
+/* Style cho modal lớn hơn */
+.modal-lg .modal-content {
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+/* Style cho preview hình ảnh */
+.image-preview-container {
+    min-height: 150px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-preview {
+    max-height: 120px;
+}
+
+/* Style cho thông báo lỗi trong form */
+.form-error {
+    color: #e74a3b;
+    font-size: 0.85rem;
+    margin-top: 5px;
+    display: none;
+}
+
+/* Style cho trạng thái sản phẩm gần hết hạn */
+.table-sm .badge.bg-danger {
+    background-color: #e74a3b !important;
+    color: #fff;
+}
+
+.table-sm .badge.bg-warning {
+    background-color: #f6c23e !important;
+    color: #fff;
+}

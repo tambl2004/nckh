@@ -2,24 +2,33 @@
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-require 'vendor/autoload.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 function sendMail($to, $subject, $message) {
     $mail = new PHPMailer(true);
     
     try {
+        // Tắt chế độ SSL verification để test
+        $mail->SMTPOptions = array(
+            'ssl' => array(
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+                'allow_self_signed' => true
+            )
+        );
+        
         // Cấu hình máy chủ
         $mail->isSMTP();
-        $mail->Host = 'smtp.gmail.com'; // Thay bằng SMTP server của bạn
+        $mail->Host = 'smtp.gmail.com';
         $mail->SMTPAuth = true;
-        $mail->Username = 'email@example.com'; // Thay bằng email của bạn
-        $mail->Password = 'abcabcabc'; // Mật khẩu ứng dụng
+        $mail->Username = 'zzztamdzzz@gmail.com'; // Thay bằng email thực của bạn
+        $mail->Password = 'lnkl vnjl hgsh ursi'; // Mật khẩu ứng dụng (app password), không phải mật khẩu thông thường
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port = 587;
         $mail->CharSet = 'UTF-8';
         
         // Người gửi và người nhận
-        $mail->setFrom('thanhhtb2312@gmail.com', 'Hệ thống Quản lý Kho');
+        $mail->setFrom('zzztamdzzz@gmail.com', 'Hệ thống Quản lý Kho');
         $mail->addAddress($to);
         
         // Nội dung

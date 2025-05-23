@@ -56,7 +56,7 @@
 git clone https://github.com/tambl2004/nckh.git
 
 # Di chuyển vào thư mục dự án
-cd smart-warehouse
+cd nckh
 
 # Cài đặt backend PHP (nếu cần)
 composer install
